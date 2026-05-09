@@ -86,7 +86,8 @@ The brushless motor and electronic speed controller generate the thrust magnitud
 
 At a simplified level, the rail-direction force can be modeled as:
 
-\[F_{rail} = T \sin(\theta)\]
+$$F_{rail} = T \sin(\theta)$$
+
 where:
 - $T$ is the motor thrust magnitude and
 - $\theta$ is the thrust-vector angle relative to the vertical axis.
