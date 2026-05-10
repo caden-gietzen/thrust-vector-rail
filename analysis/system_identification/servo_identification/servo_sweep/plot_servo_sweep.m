@@ -29,8 +29,7 @@ if USE_LATEST_CSV
         error("No CSV files found in mirrored data folder:\n%s", dataDir);
     end
 
-    [~, newestIdx] = max([csvFiles.datenum]);
-    dataFile = string(csvFiles(newestIdx).name);
+    dataFile = selectLatestIndexedCsv(csvFiles);
 end
 
 dataPath = fullfile(dataDir, dataFile);
