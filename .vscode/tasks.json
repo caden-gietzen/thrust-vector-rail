@@ -1,0 +1,22 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Run current Pico file and pull CSV",
+            "type": "shell",
+            "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe",
+            "args": [
+                "tools/run_pico_and_pull.py",
+                "${file}"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": []
+        }
+    ]
+}

@@ -179,3 +179,11 @@ cython_debug/
 #  refer to https://docs.cursor.com/context/ignore-files
 .cursorignore
 .cursorindexingignore
+
+# MicroPico / local Pico extension state
+.micropico
+
+# VS Code
+.vscode/*
+!.vscode/tasks.json
+!.vscode/extensions.json
