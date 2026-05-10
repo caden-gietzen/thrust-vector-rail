@@ -53,6 +53,10 @@ try:
 
     start_ms = time.ticks_ms()
 
+    FILENAME = "servo_sweep_{}_to_{}us_trial.csv".format(
+        SERVO_MIN_US,
+        SERVO_MAX_US
+    )
     with open(FILENAME, "w") as f:
         f.write("t_ms,t_s,servo_us,count\n")
 
@@ -81,7 +85,6 @@ try:
 
     print("Sweep complete.")
 
-    FILENAME = "servo_sweep_log.csv"
 
 finally:
     print("Centering servo and shutting down.")
