@@ -14,7 +14,7 @@ SERVO_MIN_US = 800
 SERVO_MAX_US = 2125
 SERVO_FREQ_HZ = 50
 
-FILENAME = "servo_sweep_log.csv"
+FILENAME = None
 
 STEP_US = 25
 HOLD_MS = 250
@@ -81,9 +81,15 @@ try:
 
     print("Sweep complete.")
 
+    FILENAME = "servo_sweep_log.csv"
+
 finally:
     print("Centering servo and shutting down.")
     write_pwm_us(servo, SERVO_CENTER_US)
     time.sleep_ms(500)
     servo.deinit()
-    print("Saved:", FILENAME)
+
+    if FILENAME is not None:
+        print("Saved:", FILENAME)
+    else:
+        print("No file was created.")
