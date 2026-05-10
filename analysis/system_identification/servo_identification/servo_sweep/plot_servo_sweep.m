@@ -5,23 +5,38 @@
 clear; clc; close all;
 
 % ----------------------------
-% User-selected data file
+% User options
 % ----------------------------
 
-dataFile = "servo_sweep_log.csv";
+USE_LATEST_CSV = true;
+
+% Used only when USE_LATEST_CSV = false
+dataFile = "2026_05_10_servo_sweep_800us_2125us_00.csv";
 
 % ----------------------------
 % Locate project paths
 % ----------------------------
 
-repoRoot = findRepoRoot();
+scriptPath = mfilename("fullpath");
 
-dataPath = fullfile(repoRoot, "data", "raw", "servo_identification", "servo_sweep", dataFile);
-plotDir = fullfile(repoRoot, "plots", "servo_identification");
+dataDir = getMirroredRawDataDir(scriptPath);
+plotDir = getMirroredPlotDir(scriptPath);
 
-if ~isfolder(plotDir)
-    mkdir(plotDir);
+if USE_LATEST_CSV
+    csvFiles = dir(fullfile(dataDir, "*.csv"));
+
+    if isempty(csvFiles)
+        error("No CSV files found in mirrored data folder:\n%s", dataDir);
+    end
+
+    [~, newestIdx] = max([csvFiles.datenum]);
+    dataFile = string(csvFiles(newestIdx).name);
 end
+
+dataPath = fullfile(dataDir, dataFile);
+
+fprintf("\nUsing data file:\n");
+fprintf("  %s\n", dataPath);
 
 % ----------------------------
 % Load data
@@ -121,28 +136,3 @@ fprintf("Counts per microsecond: %.6f\n", p(1));
 
 p_angle = polyfit(theta_cmd_deg, count_zeroed, 1);
 fprintf("Approx counts per commanded degree: %.6f\n", p_angle(1));
-
-% ----------------------------
-% Helper function
-% ----------------------------
-
-function repoRoot = findRepoRoot()
-    currentDir = fileparts(mfilename("fullpath"));
-
-    while true
-        gitDir = fullfile(currentDir, ".git");
-
-        if isfolder(gitDir)
-            repoRoot = currentDir;
-            return;
-        end
-
-        parentDir = fileparts(currentDir);
-
-        if strcmp(parentDir, currentDir)
-            error("Could not find repo root. No .git folder found above this script.");
-        end
-
-        currentDir = parentDir;
-    end
-end
