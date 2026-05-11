@@ -167,11 +167,15 @@ def get_data_output_dir(pico_script_path):
     """
     Maps:
 
-        firmware/pico_micropython/system_identification/servo_identification/servo_sweep/servo_sweep_log.py
+        firmware/pico_micropython/hardware_validation/hx711_load_cell/load_cell_calibration.py
 
     to:
 
-        data/raw/system_identification/servo_identification/servo_sweep
+        data/raw/hardware_validation/hx711_load_cell/load_cell_calibration
+
+    In other words, the raw-data folder mirrors the firmware folder structure
+    under firmware/pico_micropython, then adds one final folder named after
+    the exact MicroPython script that generated the data.
     """
     pico_script_path = pico_script_path.resolve()
 
@@ -185,8 +189,9 @@ def get_data_output_dir(pico_script_path):
         )
 
     relative_folder = relative_script_path.parent
+    script_folder = relative_script_path.stem
 
-    return DATA_RAW_ROOT / relative_folder
+    return DATA_RAW_ROOT / relative_folder / script_folder
 
 
 def pull_file_from_pico(remote_filename, local_output_path, port):
@@ -209,6 +214,30 @@ def pull_file_from_pico(remote_filename, local_output_path, port):
 
     if return_code != 0:
         raise RuntimeError(f"Failed to pull {remote_filename} from Pico.")
+
+
+def remove_file_from_pico(remote_filename, port):
+    """
+    Removes a file from the Pico filesystem after it has been successfully
+    copied to the laptop.
+
+    This prevents the Pico flash storage from slowly filling with duplicate
+    CSV files.
+    """
+    command = get_mpremote_base(port) + [
+        "fs",
+        "rm",
+        f":{remote_filename}",
+    ]
+
+    return_code, _ = run_command(command)
+
+    if return_code != 0:
+        raise RuntimeError(
+            f"Pulled {remote_filename}, but failed to remove it from the Pico.\n"
+            "The local copy should still exist, but check the Pico filesystem "
+            "before running many more tests."
+        )
 
 
 def parse_args():
@@ -321,6 +350,12 @@ def main():
 
     print("\nPulled CSV to:")
     print(f"  {local_csv_path}")
+
+    # Step 5: Remove the CSV from the Pico only after the local pull succeeds.
+    remove_file_from_pico(saved_csv_name, port)
+
+    print("\nRemoved CSV from Pico:")
+    print(f"  {saved_csv_name}")
 
 
 if __name__ == "__main__":
