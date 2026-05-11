@@ -166,11 +166,11 @@ This indicates that:
 
 <a id="fig-calibration-valid"></a>
 
-![Figure 4](figures/validation_error_using_latest_calibration_fit.png)
+![Figure 3](figures/validation_error_using_latest_calibration_fit.png)
 
-*Figure 4. Validation error obtained when applying the latest calibration fit to earlier independent calibration datasets.*
+*Figure 3. Validation error obtained when applying the latest calibration fit to earlier independent calibration datasets.*
 
-As shown in [Figure 4](#fig-calibration-valid), the identified calibration fit generalized consistently across earlier calibration datasets with relatively small validation error.
+As shown in [Figure 3](#fig-calibration-valid), the identified calibration fit generalized consistently across earlier calibration datasets with relatively small validation error.
 
 ---
 
@@ -180,11 +180,11 @@ The acquired HX711 measurements demonstrated strong short-term stability and rep
 
 <a id="fig-calibration-samples"></a>
 
-![Figure 3](figures/hx711_load_cell_calibration_samples.png)
+![Figure 4](figures/hx711_load_cell_calibration_samples.png)
 
-*Figure 3. Tared HX711 measurements during the calibration sequence. Stable plateaus and relatively low variance were observed at each applied calibration mass.*
+*Figure 4. Tared HX711 measurements during the calibration sequence. Stable plateaus and relatively low variance were observed at each applied calibration mass.*
 
-As shown in [Figure 3](#fig-calibration-samples), the measurement variance within each calibration interval remained relatively small compared to the separation between calibration levels. This behavior provided additional confidence that the acquisition pipeline was sufficiently stable for thrust characterization and system identification experiments.
+As shown in [Figure 4](#fig-calibration-samples), the measurement variance within each calibration interval remained relatively small compared to the separation between calibration levels. This behavior provided additional confidence that the acquisition pipeline was sufficiently stable for thrust characterization and system identification experiments.
 
 ---
 
