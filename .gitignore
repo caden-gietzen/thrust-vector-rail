@@ -187,3 +187,6 @@ cython_debug/
 .vscode/*
 !.vscode/tasks.json
 !.vscode/extensions.json
+
+# MATLAB editable figure files
+*.fig

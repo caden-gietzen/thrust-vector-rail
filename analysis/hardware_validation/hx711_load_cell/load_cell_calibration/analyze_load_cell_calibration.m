@@ -11,6 +11,7 @@ clear; clc; close all;
 % ----------------------------
 
 USE_LATEST_CSV = true;
+SAVE_FIGURES = true;
 
 % Used only when USE_LATEST_CSV = false
 dataFile = "2026_05_10_servo_sweep_800us_2125us_00.csv";
@@ -282,3 +283,5 @@ end
 fprintf("\nUse in MicroPython:\n");
 fprintf("  SCALE_G_PER_COUNT = %.9f\n", grams_per_count);
 fprintf("  OFFSET_COUNTS = measured tare offset from script\n");
+
+saveAllFiguresIfEnabled(SAVE_FIGURES);
