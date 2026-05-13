@@ -181,11 +181,10 @@ def get_data_output_dir(pico_script_path):
 
     to:
 
-        data/raw/hardware_validation/hx711_load_cell/load_cell_calibration
+        data/raw/hardware_validation/hx711_load_cell/load_cell_calibration/candidate
 
-    In other words, the raw-data folder mirrors the firmware folder structure
-    under firmware/pico_micropython, then adds one final folder named after
-    the exact MicroPython script that generated the data.
+    Data is always pulled into candidate first. After review, manually promote
+    files to accepted, rejected, or diagnostics.
     """
     pico_script_path = pico_script_path.resolve()
 
@@ -201,7 +200,7 @@ def get_data_output_dir(pico_script_path):
     relative_folder = relative_script_path.parent
     script_folder = relative_script_path.stem
 
-    return DATA_RAW_ROOT / relative_folder / script_folder
+    return DATA_RAW_ROOT / relative_folder / script_folder / "candidate"
 
 
 def pull_file_from_pico(remote_filename, local_output_path, port):
