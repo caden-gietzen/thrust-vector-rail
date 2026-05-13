@@ -13,6 +13,13 @@ DATA_RAW_ROOT = REPO_ROOT / "data" / "raw"
 
 SAVED_FILE_PATTERN = re.compile(r"Saved:\s*([^\s]+\.csv)")
 
+DATASET_STATUS_FOLDERS = [
+    "candidate",
+    "accepted",
+    "rejected",
+    "diagnostics",
+]
+
 def run_command(command, cwd=None, show_output=True):
     """
     Run a shell command and stream output live.
@@ -181,10 +188,10 @@ def get_data_output_dir(pico_script_path):
 
     to:
 
-        data/raw/hardware_validation/hx711_load_cell/load_cell_calibration/candidate
+        data/raw/hardware_validation/hx711_load_cell/load_cell_calibration
 
-    Data is always pulled into candidate first. After review, manually promote
-    files to accepted, rejected, or diagnostics.
+    The candidate, accepted, rejected, and diagnostics folders are created
+    inside this folder. New data is pulled into candidate by default.
     """
     pico_script_path = pico_script_path.resolve()
 
@@ -200,8 +207,18 @@ def get_data_output_dir(pico_script_path):
     relative_folder = relative_script_path.parent
     script_folder = relative_script_path.stem
 
-    return DATA_RAW_ROOT / relative_folder / script_folder / "candidate"
+    return DATA_RAW_ROOT / relative_folder / script_folder
 
+def ensure_dataset_status_folders(base_output_dir):
+    """
+    Ensures the standard dataset review folders exist.
+
+    New data is written to candidate. After review, files can be moved to
+    accepted, rejected, or diagnostics.
+    """
+    for folder_name in DATASET_STATUS_FOLDERS:
+        folder_path = base_output_dir / folder_name
+        folder_path.mkdir(parents=True, exist_ok=True)
 
 def pull_file_from_pico(remote_filename, local_output_path, port):
     """
@@ -313,8 +330,11 @@ def main():
     if not pico_script_path.exists():
         raise FileNotFoundError(f"Pico script not found: {pico_script_path}")
 
-    output_dir = get_data_output_dir(pico_script_path)
+    base_output_dir = get_data_output_dir(pico_script_path)
+    ensure_dataset_status_folders(base_output_dir)
 
+    output_dir = base_output_dir / "candidate"
+    
     print("Pico script:")
     print(f"  {pico_script_path}")
 

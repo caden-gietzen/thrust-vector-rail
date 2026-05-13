@@ -51,7 +51,7 @@ NUM_ACQUISITION_SETS = 1
 #   set 1 uses BASE_PRPS_SEED
 #   set 2 uses BASE_PRPS_SEED + 1
 #   etc.
-BASE_PRPS_SEED = 2001
+BASE_PRPS_SEED = 2003
 
 # Separate seed offset for run-order shuffling.
 RUN_ORDER_SEED_OFFSET = 50000
