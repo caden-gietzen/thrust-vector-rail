@@ -1,0 +1,1890 @@
+%% analyze_thrust_prps_frequency_fit.m
+% Analyze thrust PRPS DAQ files using frequency-domain fitting.
+%
+% PRPS = pseudo-random periodic signal.
+%
+% Expected newer CSV columns from thrust_prps_daq_voltage.py:
+%   t_ms,t_s,set_index,prps_seed,run_order_seed,run_name,segment,pwm_us,
+%   raw_count,tared_count,force_N,
+%   battery_voltage_V,battery_current_A,battery_remaining_pct,battery_age_ms,
+%   mavlink_total_packets,mavlink_sys_status_packets,mavlink_bad_frames,
+%   phase,period_index,period_sample_index
+%
+% Identification goal:
+%   Estimate empirical frequency response:
+%
+%       G_emp(jw) = Delta Force(jw) / Delta PWM(jw)
+%
+%   Then fit continuous-time transfer functions:
+%
+%       1st order:
+%           G(s) = K / (tau*s + 1)
+%
+%       1st order + delay:
+%           G(s) = K*exp(-L*s) / (tau*s + 1)
+%
+%       2nd order lag:
+%           G(s) = K / ((tau1*s + 1)*(tau2*s + 1))
+%
+%       2nd order lag + delay:
+%           G(s) = K*exp(-L*s) / ((tau1*s + 1)*(tau2*s + 1))
+%
+% Frequency fitting is done using weighted complex error.
+%
+% Recommended weighting:
+%   Relative complex error:
+%
+%       error_i = (G_model_i - G_emp_i) / max(abs(G_emp_i), gain_floor)
+%
+%   optionally multiplied by coherence weighting.
+%
+% Why:
+%   - Fitting raw complex error makes large low-frequency magnitudes dominate.
+%   - Fitting pure inverse magnitude can overweight tiny noisy high-frequency points.
+%   - The gain floor prevents garbage high-frequency points from dominating.
+%
+% Units:
+%   Input: PWM command in microseconds
+%   Output: thrust in newtons
+%   Transfer function magnitude: N/us
+
+clear; clc; close all;
+
+%% ============================================================
+% User options
+% ============================================================
+
+SAVE_FIGURES = false;
+
+% Train on first N CSV files in sorted folder order.
+TRAIN_ON_FIRST_N_FILES = true;
+NUM_TRAINING_FILES = 1;
+
+% Used only if TRAIN_ON_FIRST_N_FILES = false.
+trainingFile = "thrust_prps_daq_voltage_set01_seed2001.csv";
+
+runNames = [
+    "global_1100_1950"
+    "local_1400_1650"
+    "local_1700_1850"
+];
+
+USE_NOMINAL_COMMAND_DT_FOR_FRF = true;
+NOMINAL_COMMAND_DT_S = 0.050;
+
+%% ============================================================
+% PRPS / frequency extraction options
+% ============================================================
+
+% If true, use only phase == "prps".
+USE_ONLY_PRPS_PHASE = true;
+
+% Minimum complete periods required per file/run.
+MIN_PERIODS_PER_RUN = 1;
+
+% Minimum samples required in one period.
+MIN_SAMPLES_PER_PERIOD = 20;
+
+% If true, infer excited frequencies from the input PWM spectrum.
+% This is robust because the Pico CSV stores period_sample_index but not
+% the frequency list directly.
+INFER_EXCITED_FREQUENCIES_FROM_INPUT = true;
+
+% Used only if INFER_EXCITED_FREQUENCIES_FROM_INPUT = false.
+MANUAL_EXCITED_FREQS_HZ = [
+    0.05
+    0.075
+    0.10
+    0.15
+    0.20
+    0.30
+    0.40
+    0.60
+    0.80
+    1.00
+    1.25
+    1.50
+    2.00
+];
+
+% If inferring frequencies, keep DFT bins whose input magnitude is above:
+%
+%   threshold = max_input_bin_magnitude * INPUT_BIN_RELATIVE_THRESHOLD
+%
+% Increase if too many tiny bins are detected.
+% Decrease if valid injected frequencies are being missed.
+INPUT_BIN_RELATIVE_THRESHOLD = 0.05;
+
+% Restrict frequency range used for fitting and plotting.
+FREQ_MIN_HZ = 0.03;
+FREQ_MAX_HZ = 3.00;
+
+% Reject frequency points with coherence below this value for fitting.
+% Coherence is estimated across repeated periods/files.
+MIN_COHERENCE_FOR_FIT = 0.50;
+
+% If true, still plot rejected low-coherence points as faded/marked points.
+PLOT_REJECTED_FREQ_POINTS = true;
+
+% Remove per-period DC offsets before Fourier coefficient extraction.
+REMOVE_PERIOD_MEAN = true;
+
+% Optional linear detrend per period before Fourier extraction.
+% Usually false for short periodic records; mean removal is enough.
+DETREND_EACH_PERIOD = false;
+
+%% ============================================================
+% Frequency-domain fitting options
+% ============================================================
+
+% Candidate model toggles.
+FIT_FIRST_ORDER                 = true;
+FIT_FIRST_ORDER_DELAY           = true;
+FIT_SECOND_ORDER_LAG            = true;
+FIT_SECOND_ORDER_LAG_DELAY      = true;
+
+% Model selection:
+%   "lowest_validation_error" = prefer validation if available
+%   "lowest_training_error"   = choose best training fit
+%   "simplicity_tolerance"    = simplest model within tolerance of best training fit
+MODEL_SELECTION_MODE = "lowest_training_error";
+
+% If simplicity mode is used, choose simplest model whose weighted training
+% error is within this relative tolerance of the best model.
+SIMPLE_MODEL_RELATIVE_TOLERANCE = 0.05;
+
+% Weighting mode:
+%   "relative_complex"      = divide complex error by magnitude floor
+%   "relative_with_coh"     = relative error weighted by sqrt(coherence)
+%   "absolute_complex"      = raw complex error, not recommended initially
+WEIGHTING_MODE = "relative_with_coh";
+
+% Gain floor strategy:
+%   "fraction_of_median" = floor = fraction * median(abs(G_emp))
+%   "manual"             = floor = MANUAL_GAIN_FLOOR_N_PER_US
+GAIN_FLOOR_MODE = "fraction_of_median";
+GAIN_FLOOR_FRACTION_OF_MEDIAN = 0.20;
+MANUAL_GAIN_FLOOR_N_PER_US = 1e-4;
+
+% Optimization settings.
+MAX_FMINSEARCH_ITER = 5000;
+MAX_FMINSEARCH_EVAL = 10000;
+
+% Initial parameter guesses.
+% These are intentionally conservative.
+INITIAL_K_N_PER_US = 0.003;
+INITIAL_TAU_S = 0.40;
+INITIAL_DELAY_S = 0.05;
+INITIAL_TAU2_S = 0.08;
+
+% Bound-like soft limits through parameter transform/clamping.
+MIN_TAU_S = 0.02;
+MAX_TAU_S = 10.0;
+MIN_DELAY_S = 0.0;
+MAX_DELAY_S = 2.0;
+MIN_GAIN_ABS = 1e-6;
+MAX_GAIN_ABS = 0.02;
+
+%% ============================================================
+% Time-domain translation options
+% ============================================================
+
+% Translate fitted frequency-domain model into time-domain prediction using
+% lsim on the PRPS validation/training input.
+PLOT_TIME_DOMAIN_TRANSLATION_TRAINING   = true;
+PLOT_TIME_DOMAIN_TRANSLATION_VALIDATION = true;
+
+% Time-domain fit uses measured initial output offset:
+% y_model_total = mean(y_measured) + lsim(G, u - mean(u))
+CENTER_TIME_DOMAIN_SIGNALS = true;
+
+%% ============================================================
+% Plot toggles
+% Initially leave only the most telling plots true.
+% ============================================================
+
+PLOT_TRAINING_EMPIRICAL_BODE_WITH_FITS      = true;
+PLOT_VALIDATION_BODE_VS_TRAINING_MODEL      = true;
+PLOT_TRAINING_VS_VALIDATION_EMPIRICAL_BODE  = false;
+PLOT_COHERENCE_BY_RUN                       = false;
+PLOT_MODEL_COMPARISON_BAR                   = false;
+
+PLOT_TIME_DOMAIN_TRANSLATION_BEST_ONLY      = true;
+PLOT_ALL_TIME_DOMAIN_MODEL_TRANSLATIONS     = false;
+
+PLOT_RAW_PRPS_TIME_SNIPPET                  = false;
+PLOT_INPUT_SPECTRUM_DIAGNOSTIC              = false;
+PLOT_PERIOD_OVERLAY_DIAGNOSTIC              = false;
+PLOT_SAMPLE_TIME_DIAGNOSTIC                 = false;
+PLOT_VOLTAGE_TIME                           = false;
+
+%% ============================================================
+% Locate mirrored folders
+% ============================================================
+
+scriptPath = mfilename("fullpath");
+
+dataDir = getMirroredRawDataDir(scriptPath);
+plotDir = getMirroredPlotDir(scriptPath);
+
+addpath(genpath(fullfile(findRepoRoot(scriptPath), "analysis", "util")));
+
+csvFiles = dir(fullfile(dataDir, "*.csv"));
+
+if isempty(csvFiles)
+    error("No CSV files found in:\n%s", dataDir);
+end
+
+[~, sortIdx] = sort(string({csvFiles.name}));
+csvFiles = csvFiles(sortIdx);
+
+if TRAIN_ON_FIRST_N_FILES
+    nTrain = min(NUM_TRAINING_FILES, numel(csvFiles));
+
+    trainingCsvFiles = csvFiles(1:nTrain);
+    validationCsvFiles = csvFiles(nTrain+1:end);
+
+    fprintf("\nTraining / identification files:\n");
+    for k = 1:numel(trainingCsvFiles)
+        fprintf("  %s\n", fullfile(trainingCsvFiles(k).folder, trainingCsvFiles(k).name));
+    end
+
+    fprintf("\nValidation files:\n");
+    if isempty(validationCsvFiles)
+        fprintf("  None. Not enough CSV files beyond first %d training files.\n", nTrain);
+    else
+        for k = 1:numel(validationCsvFiles)
+            fprintf("  %s\n", fullfile(validationCsvFiles(k).folder, validationCsvFiles(k).name));
+        end
+    end
+else
+    trainingPath = fullfile(dataDir, trainingFile);
+    trainingCsvFiles = dir(trainingPath);
+
+    if isempty(trainingCsvFiles)
+        error("Training file not found:\n%s", trainingPath);
+    end
+
+    validationCsvFiles = csvFiles(string({csvFiles.name}) ~= string(trainingFile));
+
+    fprintf("\nTraining / identification file:\n  %s\n", trainingPath);
+end
+
+trainingLabel = makeFileListLabel(trainingCsvFiles);
+
+%% ============================================================
+% Load combined tables
+% ============================================================
+
+Ttrain = readCombinedCsvTables(trainingCsvFiles);
+
+if isempty(validationCsvFiles)
+    Tval = table();
+else
+    Tval = readCombinedCsvTables(validationCsvFiles);
+end
+
+%% ============================================================
+% Main frequency-domain identification loop
+% ============================================================
+
+allSummaryRows = [];
+bestModels = struct();
+trainingFrfs = struct();
+validationFrfs = struct();
+
+for r = 1:numel(runNames)
+    runName = runNames(r);
+    modelKey = matlab.lang.makeValidName(runName);
+
+    fprintf("\n============================================================\n");
+    fprintf("Run: %s\n", runName);
+    fprintf("============================================================\n");
+
+    Dtrain = getRunData(Ttrain, runName, USE_ONLY_PRPS_PHASE);
+
+    if height(Dtrain) < MIN_SAMPLES_PER_PERIOD
+        warning("Skipping %s: not enough training samples.", runName);
+        continue;
+    end
+
+    trainFrf = estimatePrpsFrfFromTable( ...
+        Dtrain, ...
+        runName, ...
+        "training", ...
+        INFER_EXCITED_FREQUENCIES_FROM_INPUT, ...
+        MANUAL_EXCITED_FREQS_HZ, ...
+        INPUT_BIN_RELATIVE_THRESHOLD, ...
+        FREQ_MIN_HZ, ...
+        FREQ_MAX_HZ, ...
+        REMOVE_PERIOD_MEAN, ...
+        DETREND_EACH_PERIOD, ...
+        MIN_PERIODS_PER_RUN, ...
+        MIN_SAMPLES_PER_PERIOD, ...
+        USE_NOMINAL_COMMAND_DT_FOR_FRF, ...
+        NOMINAL_COMMAND_DT_S);
+
+    if isempty(trainFrf.f_Hz)
+        warning("Skipping %s: no training FRF points.", runName);
+        continue;
+    end
+
+    trainingFrfs.(modelKey) = trainFrf;
+
+    if ~isempty(Tval)
+        DvalAll = getRunData(Tval, runName, USE_ONLY_PRPS_PHASE);
+
+        if height(DvalAll) >= MIN_SAMPLES_PER_PERIOD
+            valFrf = estimatePrpsFrfFromTable( ...
+                DvalAll, ...
+                runName, ...
+                "validation", ...
+                false, ...
+                trainFrf.f_Hz, ...
+                INPUT_BIN_RELATIVE_THRESHOLD, ...
+                FREQ_MIN_HZ, ...
+                FREQ_MAX_HZ, ...
+                REMOVE_PERIOD_MEAN, ...
+                DETREND_EACH_PERIOD, ...
+                MIN_PERIODS_PER_RUN, ...
+                MIN_SAMPLES_PER_PERIOD, ...
+                USE_NOMINAL_COMMAND_DT_FOR_FRF, ...
+                NOMINAL_COMMAND_DT_S);
+
+            validationFrfs.(modelKey) = valFrf;
+        else
+            valFrf = emptyFrf();
+        end
+    else
+        valFrf = emptyFrf();
+    end
+
+    if PLOT_RAW_PRPS_TIME_SNIPPET
+        plotRawTimeSnippet(Dtrain, runName, "training");
+    end
+
+    if PLOT_INPUT_SPECTRUM_DIAGNOSTIC
+        plotInputSpectrumDiagnostic(trainFrf, runName, "training");
+    end
+
+    if PLOT_COHERENCE_BY_RUN
+        plotCoherence(trainFrf, valFrf, runName);
+    end
+
+    fitMask = trainFrf.coherence >= MIN_COHERENCE_FOR_FIT & ...
+              isfinite(trainFrf.G_emp) & ...
+              isfinite(trainFrf.f_Hz) & ...
+              trainFrf.f_Hz >= FREQ_MIN_HZ & ...
+              trainFrf.f_Hz <= FREQ_MAX_HZ;
+
+    if nnz(fitMask) < 2
+        warning("Skipping %s: fewer than 2 usable frequency points after coherence filtering.", runName);
+        continue;
+    end
+
+    candidateModels = fitFrequencyModels( ...
+        trainFrf.f_Hz(fitMask), ...
+        trainFrf.G_emp(fitMask), ...
+        trainFrf.coherence(fitMask), ...
+        FIT_FIRST_ORDER, ...
+        FIT_FIRST_ORDER_DELAY, ...
+        FIT_SECOND_ORDER_LAG, ...
+        FIT_SECOND_ORDER_LAG_DELAY, ...
+        WEIGHTING_MODE, ...
+        GAIN_FLOOR_MODE, ...
+        GAIN_FLOOR_FRACTION_OF_MEDIAN, ...
+        MANUAL_GAIN_FLOOR_N_PER_US, ...
+        INITIAL_K_N_PER_US, ...
+        INITIAL_TAU_S, ...
+        INITIAL_DELAY_S, ...
+        INITIAL_TAU2_S, ...
+        MIN_TAU_S, ...
+        MAX_TAU_S, ...
+        MIN_DELAY_S, ...
+        MAX_DELAY_S, ...
+        MIN_GAIN_ABS, ...
+        MAX_GAIN_ABS, ...
+        MAX_FMINSEARCH_ITER, ...
+        MAX_FMINSEARCH_EVAL);
+
+    if isempty(candidateModels)
+        warning("No models fit for %s.", runName);
+        continue;
+    end
+
+    candidateModels = scoreModelsOnFrf(candidateModels, trainFrf, "training");
+
+    if ~isempty(valFrf.f_Hz)
+        candidateModels = scoreModelsOnFrf(candidateModels, valFrf, "validation");
+    end
+
+    bestModel = selectBestFrequencyModel( ...
+        candidateModels, ...
+        MODEL_SELECTION_MODE, ...
+        SIMPLE_MODEL_RELATIVE_TOLERANCE);
+
+    bestModels.(modelKey) = bestModel;
+
+    fprintf("\nBest model for %s:\n", runName);
+    printFrequencyModel(bestModel);
+
+    for m = 1:numel(candidateModels)
+        cm = candidateModels(m);
+
+        allSummaryRows = [allSummaryRows; {
+            trainingLabel, ...
+            runName, ...
+            cm.model_type, ...
+            cm.complexity, ...
+            cm.K, ...
+            cm.tau1_s, ...
+            cm.tau2_s, ...
+            cm.delay_s, ...
+            cm.train_weighted_error, ...
+            getfieldwithdefault(cm, "validation_weighted_error", NaN), ...
+            cm.train_mag_rmse_dB, ...
+            cm.train_phase_rmse_deg, ...
+            getfieldwithdefault(cm, "validation_mag_rmse_dB", NaN), ...
+            getfieldwithdefault(cm, "validation_phase_rmse_deg", NaN)
+        }];
+    end
+
+    if PLOT_TRAINING_EMPIRICAL_BODE_WITH_FITS
+        plotEmpiricalBodeWithFits(trainFrf, candidateModels, bestModel, runName, "training", ...
+            MIN_COHERENCE_FOR_FIT, PLOT_REJECTED_FREQ_POINTS);
+    end
+
+    if PLOT_VALIDATION_BODE_VS_TRAINING_MODEL && ~isempty(valFrf.f_Hz)
+        plotValidationBodeVsTrainingModel(valFrf, bestModel, runName, MIN_COHERENCE_FOR_FIT);
+    end
+
+    if PLOT_TRAINING_VS_VALIDATION_EMPIRICAL_BODE && ~isempty(valFrf.f_Hz)
+        plotTrainingVsValidationEmpiricalBode(trainFrf, valFrf, runName, MIN_COHERENCE_FOR_FIT);
+    end
+
+    if PLOT_MODEL_COMPARISON_BAR
+        plotModelComparison(candidateModels, runName);
+    end
+
+    if PLOT_TIME_DOMAIN_TRANSLATION_TRAINING
+        plotTimeDomainTranslationForDataset( ...
+            Dtrain, ...
+            bestModel, ...
+            candidateModels, ...
+            runName, ...
+            "training", ...
+            CENTER_TIME_DOMAIN_SIGNALS, ...
+            PLOT_TIME_DOMAIN_TRANSLATION_BEST_ONLY, ...
+            PLOT_ALL_TIME_DOMAIN_MODEL_TRANSLATIONS);
+    end
+
+    if PLOT_TIME_DOMAIN_TRANSLATION_VALIDATION && ~isempty(Tval)
+        DvalTime = getRunData(Tval, runName, USE_ONLY_PRPS_PHASE);
+
+        if height(DvalTime) >= MIN_SAMPLES_PER_PERIOD
+            plotTimeDomainTranslationForDataset( ...
+                DvalTime, ...
+                bestModel, ...
+                candidateModels, ...
+                runName, ...
+                "validation", ...
+                CENTER_TIME_DOMAIN_SIGNALS, ...
+                PLOT_TIME_DOMAIN_TRANSLATION_BEST_ONLY, ...
+                PLOT_ALL_TIME_DOMAIN_MODEL_TRANSLATIONS);
+        end
+    end
+
+    if PLOT_SAMPLE_TIME_DIAGNOSTIC
+        plotSampleTimeDiagnostic(Dtrain, runName, "training");
+    end
+
+    if PLOT_VOLTAGE_TIME && hasVoltage(Dtrain)
+        plotVoltageTime(Dtrain, runName, "training");
+    end
+end
+
+%% ============================================================
+% Summary table
+% ============================================================
+
+if ~isempty(allSummaryRows)
+    summaryTable = cell2table(allSummaryRows, ...
+        'VariableNames', { ...
+            'file', ...
+            'run_name', ...
+            'model_type', ...
+            'complexity', ...
+            'K_N_per_us', ...
+            'tau1_s', ...
+            'tau2_s', ...
+            'delay_s', ...
+            'train_weighted_error', ...
+            'validation_weighted_error', ...
+            'train_mag_rmse_dB', ...
+            'train_phase_rmse_deg', ...
+            'validation_mag_rmse_dB', ...
+            'validation_phase_rmse_deg' ...
+        });
+
+    disp("Frequency-domain model summary:");
+    disp(summaryTable);
+else
+    fprintf("\nNo frequency-domain models generated.\n");
+end
+
+%% ============================================================
+% Save figures
+% ============================================================
+
+cd(plotDir);
+saveAllFiguresIfEnabled(SAVE_FIGURES);
+
+%% ============================================================
+% Local helper functions
+% ============================================================
+
+function D = getRunData(T, runName, useOnlyPrpsPhase)
+    if isempty(T)
+        D = table();
+        return;
+    end
+
+    if ~ismember("run_name", string(T.Properties.VariableNames))
+        error("CSV does not contain run_name column.");
+    end
+
+    idx = strcmp(string(T.run_name), runName);
+
+    if useOnlyPrpsPhase && ismember("phase", string(T.Properties.VariableNames))
+        idx = idx & strcmpi(string(T.phase), "prps");
+    end
+
+    D = T(idx, :);
+
+    if isempty(D)
+        return;
+    end
+
+    D.t_ms = forceNumeric(D.t_ms);
+    D.t_s = forceNumeric(D.t_s);
+    D.pwm_us = forceNumeric(D.pwm_us);
+    D.force_N = forceNumeric(D.force_N);
+
+    if ismember("period_index", string(D.Properties.VariableNames))
+        D.period_index = forceNumeric(D.period_index);
+    else
+        D.period_index = zeros(height(D), 1);
+    end
+
+    if ismember("period_sample_index", string(D.Properties.VariableNames))
+        D.period_sample_index = forceNumeric(D.period_sample_index);
+    else
+        D.period_sample_index = forceNumeric(D.segment);
+    end
+
+    if ismember("battery_voltage_V", string(D.Properties.VariableNames))
+        D.battery_voltage_V = forceNumeric(D.battery_voltage_V);
+    end
+
+    if ismember("battery_current_A", string(D.Properties.VariableNames))
+        D.battery_current_A = forceNumeric(D.battery_current_A);
+    end
+
+    valid = isfinite(D.t_ms) & ...
+            isfinite(D.pwm_us) & ...
+            isfinite(D.force_N) & ...
+            isfinite(D.period_index) & ...
+            isfinite(D.period_sample_index);
+
+    D = D(valid, :);
+
+    if isempty(D)
+        return;
+    end
+
+    D.t_ms = D.t_ms - D.t_ms(1);
+end
+
+function frf = estimatePrpsFrfFromTable( ...
+    D, ...
+    runName, ...
+    datasetLabel, ...
+    inferFreqsFromInput, ...
+    freqListHz, ...
+    inputBinRelativeThreshold, ...
+    freqMinHz, ...
+    freqMaxHz, ...
+    removePeriodMean, ...
+    detrendEachPeriod, ...
+    minPeriodsPerRun, ...
+    minSamplesPerPeriod, ...
+    useNominalCommandDtForFrf, ...
+    nominalCommandDtS)
+
+    frf = emptyFrf();
+
+    if height(D) < minSamplesPerPeriod
+        return;
+    end
+
+    if ismember("source_file_index", string(D.Properties.VariableNames))
+        fileGroups = double(D.source_file_index);
+    else
+        fileGroups = ones(height(D), 1);
+    end
+
+    uniqueFiles = unique(fileGroups, "stable");
+
+    allU = [];
+    allY = [];
+    allF = [];
+    allBins = [];
+    allFileIndex = [];
+    allPeriodIndex = [];
+
+    inferredFreqsHz = [];
+
+    for fg = 1:numel(uniqueFiles)
+        fileIdx = uniqueFiles(fg);
+        Df = D(fileGroups == fileIdx, :);
+
+        periodIds = unique(Df.period_index, "stable");
+        periodIds = periodIds(periodIds >= 0);
+
+        if numel(periodIds) < minPeriodsPerRun
+            continue;
+        end
+
+        for p = 1:numel(periodIds)
+            periodId = periodIds(p);
+
+            Dp = Df(Df.period_index == periodId, :);
+
+            [uPeriod, yPeriod, tPeriod, sampleIndex] = makeUniformPeriodVectors(Dp);
+
+            if numel(uPeriod) < minSamplesPerPeriod
+                continue;
+            end
+
+            if removePeriodMean
+                uPeriod = uPeriod - mean(uPeriod, "omitnan");
+                yPeriod = yPeriod - mean(yPeriod, "omitnan");
+            end
+
+            if detrendEachPeriod
+                uPeriod = detrend(uPeriod);
+                yPeriod = detrend(yPeriod);
+            end
+
+            if useNominalCommandDtForFrf
+                dt_s = nominalCommandDtS;
+            else
+                dt_s = median(diff(tPeriod), "omitnan");
+            end
+
+            if ~isfinite(dt_s) || dt_s <= 0
+                continue;
+            end
+
+            Fs = 1 / dt_s;
+            N = numel(uPeriod);
+            period_s = N * dt_s;
+
+            Ufft = fft(uPeriod) / N;
+            Yfft = fft(yPeriod) / N;
+
+            positiveBins = (1:floor(N/2)).';
+            fHz = positiveBins / period_s;
+
+            freqMask = fHz >= freqMinHz & fHz <= freqMaxHz;
+
+            if inferFreqsFromInput && isempty(inferredFreqsHz)
+                Uabs = abs(Ufft(positiveBins));
+                UabsMasked = Uabs;
+                UabsMasked(~freqMask) = 0;
+
+                maxU = max(UabsMasked, [], "omitnan");
+
+                if maxU <= 0 || ~isfinite(maxU)
+                    continue;
+                end
+
+                keep = UabsMasked >= maxU * inputBinRelativeThreshold & freqMask;
+
+                inferredFreqsHz = fHz(keep);
+                inferredFreqsHz = unique(round(inferredFreqsHz, 10), "stable");
+            end
+
+            if inferFreqsFromInput
+                targetFreqsHz = inferredFreqsHz;
+            else
+                targetFreqsHz = freqListHz(:);
+            end
+
+            if isempty(targetFreqsHz)
+                continue;
+            end
+
+            for q = 1:numel(targetFreqsHz)
+                [~, localIdx] = min(abs(fHz - targetFreqsHz(q)));
+                bin = positiveBins(localIdx);
+                fActual = fHz(localIdx);
+
+                if fActual < freqMinHz || fActual > freqMaxHz
+                    continue;
+                end
+
+                allU(end+1, 1) = Ufft(bin);
+                allY(end+1, 1) = Yfft(bin);
+                allF(end+1, 1) = fActual;
+                allBins(end+1, 1) = bin;
+                allFileIndex(end+1, 1) = fileIdx;
+                allPeriodIndex(end+1, 1) = periodId;
+            end
+        end
+    end
+
+    if isempty(allF)
+        return;
+    end
+
+    uniqueFreqs = unique(round(allF, 10), "stable");
+
+    G_emp = NaN(numel(uniqueFreqs), 1);
+    coherence = NaN(numel(uniqueFreqs), 1);
+    Suu = NaN(numel(uniqueFreqs), 1);
+    Syy = NaN(numel(uniqueFreqs), 1);
+    Syu = NaN(numel(uniqueFreqs), 1);
+    nAvg = zeros(numel(uniqueFreqs), 1);
+
+    for i = 1:numel(uniqueFreqs)
+        idx = abs(allF - uniqueFreqs(i)) < 1e-9;
+
+        U = allU(idx);
+        Y = allY(idx);
+
+        valid = isfinite(U) & isfinite(Y) & abs(U) > 0;
+
+        U = U(valid);
+        Y = Y(valid);
+
+        if isempty(U)
+            continue;
+        end
+
+        Syu_i = mean(Y .* conj(U), "omitnan");
+        Suu_i = mean(abs(U).^2, "omitnan");
+        Syy_i = mean(abs(Y).^2, "omitnan");
+
+        G_emp(i) = Syu_i / Suu_i;
+
+        coherence(i) = abs(Syu_i)^2 / max(Suu_i * Syy_i, eps);
+
+        Suu(i) = Suu_i;
+        Syy(i) = Syy_i;
+        Syu(i) = Syu_i;
+        nAvg(i) = numel(U);
+    end
+
+    validFrf = isfinite(G_emp) & isfinite(coherence) & isfinite(uniqueFreqs(:));
+
+    frf.f_Hz = uniqueFreqs(validFrf);
+    frf.w_rad_s = 2*pi*frf.f_Hz;
+    frf.G_emp = G_emp(validFrf);
+    frf.coherence = coherence(validFrf);
+    frf.Suu = Suu(validFrf);
+    frf.Syy = Syy(validFrf);
+    frf.Syu = Syu(validFrf);
+    frf.n_avg = nAvg(validFrf);
+    frf.run_name = string(runName);
+    frf.dataset_label = string(datasetLabel);
+    frf.raw_U = allU;
+    frf.raw_Y = allY;
+    frf.raw_f_Hz = allF;
+    frf.raw_bins = allBins;
+    frf.raw_file_index = allFileIndex;
+    frf.raw_period_index = allPeriodIndex;
+
+    [frf.f_Hz, sortIdx] = sort(frf.f_Hz);
+    frf.w_rad_s = frf.w_rad_s(sortIdx);
+    frf.G_emp = frf.G_emp(sortIdx);
+    frf.coherence = frf.coherence(sortIdx);
+    frf.Suu = frf.Suu(sortIdx);
+    frf.Syy = frf.Syy(sortIdx);
+    frf.Syu = frf.Syu(sortIdx);
+    frf.n_avg = frf.n_avg(sortIdx);
+
+    fprintf("\n%s FRF for %s:\n", datasetLabel, runName);
+    fprintf("  Frequency points: %d\n", numel(frf.f_Hz));
+    fprintf("  Frequency range: %.4f to %.4f Hz\n", min(frf.f_Hz), max(frf.f_Hz));
+    fprintf("  Median coherence: %.3f\n", median(frf.coherence, "omitnan"));
+end
+
+function [uPeriod, yPeriod, tPeriod, sampleIndex] = makeUniformPeriodVectors(Dp)
+    sampleIndexRaw = forceNumeric(Dp.period_sample_index);
+    uRaw = forceNumeric(Dp.pwm_us);
+    yRaw = forceNumeric(Dp.force_N);
+    tRaw = forceNumeric(Dp.t_ms) / 1000;
+
+    valid = isfinite(sampleIndexRaw) & isfinite(uRaw) & isfinite(yRaw) & isfinite(tRaw);
+    sampleIndexRaw = sampleIndexRaw(valid);
+    uRaw = uRaw(valid);
+    yRaw = yRaw(valid);
+    tRaw = tRaw(valid);
+
+    if isempty(sampleIndexRaw)
+        uPeriod = [];
+        yPeriod = [];
+        tPeriod = [];
+        sampleIndex = [];
+        return;
+    end
+
+    sampleIndex = unique(sampleIndexRaw, "stable");
+    sampleIndex = sort(sampleIndex);
+
+    uPeriod = NaN(numel(sampleIndex), 1);
+    yPeriod = NaN(numel(sampleIndex), 1);
+    tPeriod = NaN(numel(sampleIndex), 1);
+
+    for i = 1:numel(sampleIndex)
+        idx = sampleIndexRaw == sampleIndex(i);
+
+        uPeriod(i) = mean(uRaw(idx), "omitnan");
+        yPeriod(i) = mean(yRaw(idx), "omitnan");
+        tPeriod(i) = mean(tRaw(idx), "omitnan");
+    end
+
+    valid = isfinite(uPeriod) & isfinite(yPeriod) & isfinite(tPeriod);
+    uPeriod = uPeriod(valid);
+    yPeriod = yPeriod(valid);
+    tPeriod = tPeriod(valid);
+    sampleIndex = sampleIndex(valid);
+
+    [sampleIndex, sortIdx] = sort(sampleIndex);
+    uPeriod = uPeriod(sortIdx);
+    yPeriod = yPeriod(sortIdx);
+    tPeriod = tPeriod(sortIdx);
+end
+
+function candidateModels = fitFrequencyModels( ...
+    f_Hz, ...
+    G_emp, ...
+    coherence, ...
+    fitFirstOrder, ...
+    fitFirstOrderDelay, ...
+    fitSecondOrderLag, ...
+    fitSecondOrderLagDelay, ...
+    weightingMode, ...
+    gainFloorMode, ...
+    gainFloorFractionOfMedian, ...
+    manualGainFloor, ...
+    initialK, ...
+    initialTau, ...
+    initialDelay, ...
+    initialTau2, ...
+    minTau, ...
+    maxTau, ...
+    minDelay, ...
+    maxDelay, ...
+    minGainAbs, ...
+    maxGainAbs, ...
+    maxIter, ...
+    maxEval)
+
+    modelTypes = strings(0, 1);
+
+    if fitFirstOrder
+        modelTypes(end+1, 1) = "first_order";
+    end
+
+    if fitFirstOrderDelay
+        modelTypes(end+1, 1) = "first_order_delay";
+    end
+
+    if fitSecondOrderLag
+        modelTypes(end+1, 1) = "second_order_lag";
+    end
+
+    if fitSecondOrderLagDelay
+        modelTypes(end+1, 1) = "second_order_lag_delay";
+    end
+
+    candidateModels = struct([]);
+
+    for i = 1:numel(modelTypes)
+        modelType = modelTypes(i);
+
+        model = fitOneFrequencyModel( ...
+            modelType, ...
+            f_Hz, ...
+            G_emp, ...
+            coherence, ...
+            weightingMode, ...
+            gainFloorMode, ...
+            gainFloorFractionOfMedian, ...
+            manualGainFloor, ...
+            initialK, ...
+            initialTau, ...
+            initialDelay, ...
+            initialTau2, ...
+            minTau, ...
+            maxTau, ...
+            minDelay, ...
+            maxDelay, ...
+            minGainAbs, ...
+            maxGainAbs, ...
+            maxIter, ...
+            maxEval);
+
+        if isempty(candidateModels)
+            candidateModels = model;
+        else
+            candidateModels(end+1) = model;
+        end
+    end
+end
+
+function model = fitOneFrequencyModel( ...
+    modelType, ...
+    f_Hz, ...
+    G_emp, ...
+    coherence, ...
+    weightingMode, ...
+    gainFloorMode, ...
+    gainFloorFractionOfMedian, ...
+    manualGainFloor, ...
+    initialK, ...
+    initialTau, ...
+    initialDelay, ...
+    initialTau2, ...
+    minTau, ...
+    maxTau, ...
+    minDelay, ...
+    maxDelay, ...
+    minGainAbs, ...
+    maxGainAbs, ...
+    maxIter, ...
+    maxEval)
+
+    w = 2*pi*f_Hz(:);
+    G_emp = G_emp(:);
+    coherence = coherence(:);
+
+    if strcmpi(gainFloorMode, "fraction_of_median")
+        gainFloor = gainFloorFractionOfMedian * median(abs(G_emp), "omitnan");
+    elseif strcmpi(gainFloorMode, "manual")
+        gainFloor = manualGainFloor;
+    else
+        error("Unknown GAIN_FLOOR_MODE: %s", gainFloorMode);
+    end
+
+    if ~isfinite(gainFloor) || gainFloor <= 0
+        gainFloor = manualGainFloor;
+    end
+
+    initialK = clampScalar(initialK, minGainAbs, maxGainAbs);
+    initialTau = clampScalar(initialTau, minTau, maxTau);
+    initialTau2 = clampScalar(initialTau2, minTau, maxTau);
+    initialDelay = clampScalar(initialDelay, minDelay, maxDelay);
+
+    p0 = packParams(modelType, initialK, initialTau, initialTau2, initialDelay);
+
+    costFun = @(p) frequencyFitCost( ...
+        p, modelType, w, G_emp, coherence, weightingMode, gainFloor, ...
+        minTau, maxTau, minDelay, maxDelay, minGainAbs, maxGainAbs);
+
+    opts = optimset( ...
+        "Display", "off", ...
+        "MaxIter", maxIter, ...
+        "MaxFunEvals", maxEval, ...
+        "TolX", 1e-10, ...
+        "TolFun", 1e-12);
+
+    [pBest, bestCost] = fminsearch(costFun, p0, opts);
+
+    params = unpackParams(modelType, pBest, minTau, maxTau, minDelay, maxDelay, minGainAbs, maxGainAbs);
+
+    G_fit = evalFrequencyModel(modelType, params, w);
+
+    err = weightedComplexError(G_fit, G_emp, coherence, weightingMode, gainFloor);
+    weightedError = sqrt(mean(abs(err).^2, "omitnan"));
+
+    model.model_type = string(modelType);
+    model.params = params;
+    model.K = params.K;
+    model.tau1_s = params.tau1_s;
+    model.tau2_s = params.tau2_s;
+    model.delay_s = params.delay_s;
+    model.complexity = getModelComplexity(modelType);
+    model.best_cost = bestCost;
+    model.fit_weighted_error = weightedError;
+    model.gain_floor = gainFloor;
+    model.weighting_mode = string(weightingMode);
+
+    model.train_weighted_error = weightedError;
+
+    [magRmseDb, phaseRmseDeg] = bodeErrorMetrics(G_fit, G_emp);
+    model.train_mag_rmse_dB = magRmseDb;
+    model.train_phase_rmse_deg = phaseRmseDeg;
+end
+
+function J = frequencyFitCost( ...
+    p, modelType, w, G_emp, coherence, weightingMode, gainFloor, ...
+    minTau, maxTau, minDelay, maxDelay, minGainAbs, maxGainAbs)
+
+    params = unpackParams(modelType, p, minTau, maxTau, minDelay, maxDelay, minGainAbs, maxGainAbs);
+
+    G_fit = evalFrequencyModel(modelType, params, w);
+
+    err = weightedComplexError(G_fit, G_emp, coherence, weightingMode, gainFloor);
+
+    J = mean(abs(err).^2, "omitnan");
+
+    if ~isfinite(J)
+        J = 1e30;
+    end
+end
+
+function err = weightedComplexError(G_fit, G_emp, coherence, weightingMode, gainFloor)
+    switch string(weightingMode)
+        case "relative_complex"
+            denom = max(abs(G_emp), gainFloor);
+            err = (G_fit - G_emp) ./ denom;
+
+        case "relative_with_coh"
+            denom = max(abs(G_emp), gainFloor);
+            cohWeight = sqrt(max(coherence, 0));
+            err = cohWeight .* (G_fit - G_emp) ./ denom;
+
+        case "absolute_complex"
+            err = G_fit - G_emp;
+
+        otherwise
+            error("Unknown WEIGHTING_MODE: %s", weightingMode);
+    end
+end
+
+function params = unpackParams(modelType, p, minTau, maxTau, minDelay, maxDelay, minGainAbs, maxGainAbs)
+    switch string(modelType)
+        case "first_order"
+            K = expClamp(p(1), minGainAbs, maxGainAbs);
+            tau1 = expClamp(p(2), minTau, maxTau);
+
+            params.K = K;
+            params.tau1_s = tau1;
+            params.tau2_s = NaN;
+            params.delay_s = 0;
+
+        case "first_order_delay"
+            K = expClamp(p(1), minGainAbs, maxGainAbs);
+            tau1 = expClamp(p(2), minTau, maxTau);
+            delay = expClamp(p(3), max(minDelay, 1e-6), maxDelay);
+
+            params.K = K;
+            params.tau1_s = tau1;
+            params.tau2_s = NaN;
+            params.delay_s = delay;
+
+        case "second_order_lag"
+            K = expClamp(p(1), minGainAbs, maxGainAbs);
+            tau1 = expClamp(p(2), minTau, maxTau);
+            tau2 = expClamp(p(3), minTau, maxTau);
+
+            params.K = K;
+            params.tau1_s = max(tau1, tau2);
+            params.tau2_s = min(tau1, tau2);
+            params.delay_s = 0;
+
+        case "second_order_lag_delay"
+            K = expClamp(p(1), minGainAbs, maxGainAbs);
+            tau1 = expClamp(p(2), minTau, maxTau);
+            tau2 = expClamp(p(3), minTau, maxTau);
+            delay = expClamp(p(4), max(minDelay, 1e-6), maxDelay);
+
+            params.K = K;
+            params.tau1_s = max(tau1, tau2);
+            params.tau2_s = min(tau1, tau2);
+            params.delay_s = delay;
+
+        otherwise
+            error("Unknown modelType: %s", modelType);
+    end
+end
+
+function p = packParams(modelType, K, tau1, tau2, delay)
+    K = max(K, 1e-12);
+
+    switch string(modelType)
+        case "first_order"
+            p = [log(K), log(tau1)];
+
+        case "first_order_delay"
+            p = [log(K), log(tau1), log(max(delay, 1e-6))];
+
+        case "second_order_lag"
+            p = [log(K), log(tau1), log(tau2)];
+
+        case "second_order_lag_delay"
+            p = [log(K), log(tau1), log(tau2), log(max(delay, 1e-6))];
+
+        otherwise
+            error("Unknown modelType: %s", modelType);
+    end
+end
+
+function x = signedLogParam(K)
+    if K >= 0
+        x = log(max(abs(K), 1e-12));
+    else
+        x = -log(max(abs(K), 1e-12));
+    end
+end
+
+function K = signedExpClamp(p, minAbs, maxAbs)
+    if p >= 0
+        K = exp(p);
+    else
+        K = -exp(-p);
+    end
+
+    if abs(K) < minAbs
+        K = signNonzero(K) * minAbs;
+    end
+
+    if abs(K) > maxAbs
+        K = signNonzero(K) * maxAbs;
+    end
+end
+
+function x = expClamp(p, lo, hi)
+    x = exp(p);
+    x = clampScalar(x, lo, hi);
+end
+
+function s = signNonzero(x)
+    if x >= 0
+        s = 1;
+    else
+        s = -1;
+    end
+end
+
+function y = clampScalar(x, lo, hi)
+    y = min(max(x, lo), hi);
+end
+
+function G = evalFrequencyModel(modelType, params, w)
+    s = 1j*w;
+
+    switch string(modelType)
+        case "first_order"
+            G = params.K ./ (params.tau1_s*s + 1);
+
+        case "first_order_delay"
+            G = params.K .* exp(-s*params.delay_s) ./ (params.tau1_s*s + 1);
+
+        case "second_order_lag"
+            G = params.K ./ ((params.tau1_s*s + 1) .* (params.tau2_s*s + 1));
+
+        case "second_order_lag_delay"
+            G = params.K .* exp(-s*params.delay_s) ./ ...
+                ((params.tau1_s*s + 1) .* (params.tau2_s*s + 1));
+
+        otherwise
+            error("Unknown modelType: %s", modelType);
+    end
+end
+
+function sys = makeTransferFunction(model)
+    s = tf("s");
+
+    switch string(model.model_type)
+        case "first_order"
+            sys = model.K / (model.tau1_s*s + 1);
+
+        case "first_order_delay"
+            sys = model.K / (model.tau1_s*s + 1);
+            sys.InputDelay = model.delay_s;
+
+        case "second_order_lag"
+            sys = model.K / ((model.tau1_s*s + 1)*(model.tau2_s*s + 1));
+
+        case "second_order_lag_delay"
+            sys = model.K / ((model.tau1_s*s + 1)*(model.tau2_s*s + 1));
+            sys.InputDelay = model.delay_s;
+
+        otherwise
+            error("Unknown model type: %s", model.model_type);
+    end
+end
+
+function complexity = getModelComplexity(modelType)
+    switch string(modelType)
+        case "first_order"
+            complexity = 2;
+        case "first_order_delay"
+            complexity = 3;
+        case "second_order_lag"
+            complexity = 3;
+        case "second_order_lag_delay"
+            complexity = 4;
+        otherwise
+            complexity = 999;
+    end
+end
+
+function models = scoreModelsOnFrf(models, frf, label)
+    for i = 1:numel(models)
+        model = models(i);
+        G_fit = evalFrequencyModel(model.model_type, model.params, frf.w_rad_s);
+
+        err = weightedComplexError( ...
+            G_fit, ...
+            frf.G_emp, ...
+            frf.coherence, ...
+            model.weighting_mode, ...
+            model.gain_floor);
+
+        weightedError = sqrt(mean(abs(err).^2, "omitnan"));
+
+        [magRmseDb, phaseRmseDeg] = bodeErrorMetrics(G_fit, frf.G_emp);
+
+        switch string(label)
+            case "training"
+                models(i).train_weighted_error = weightedError;
+                models(i).train_mag_rmse_dB = magRmseDb;
+                models(i).train_phase_rmse_deg = phaseRmseDeg;
+
+            case "validation"
+                models(i).validation_weighted_error = weightedError;
+                models(i).validation_mag_rmse_dB = magRmseDb;
+                models(i).validation_phase_rmse_deg = phaseRmseDeg;
+        end
+    end
+end
+
+function [magRmseDb, phaseRmseDeg] = bodeErrorMetrics(G_fit, G_emp)
+    magFitDb = 20*log10(abs(G_fit));
+    magEmpDb = 20*log10(abs(G_emp));
+
+    phaseFit = unwrap(angle(G_fit));
+    phaseEmp = unwrap(angle(G_emp));
+
+    phaseErrDeg = (phaseFit - phaseEmp) * 180/pi;
+    magErrDb = magFitDb - magEmpDb;
+
+    magRmseDb = sqrt(mean(magErrDb.^2, "omitnan"));
+    phaseRmseDeg = sqrt(mean(phaseErrDeg.^2, "omitnan"));
+end
+
+function bestModel = selectBestFrequencyModel(models, selectionMode, relativeTolerance)
+    trainErrors = [models.train_weighted_error].';
+    complexities = [models.complexity].';
+
+    hasValidation = arrayfun(@(m) isfield(m, "validation_weighted_error") && ...
+        isfinite(m.validation_weighted_error), models);
+
+    switch string(selectionMode)
+        case "lowest_validation_error"
+            if any(hasValidation)
+                valErrors = NaN(numel(models), 1);
+                for i = 1:numel(models)
+                    if isfield(models(i), "validation_weighted_error")
+                        valErrors(i) = models(i).validation_weighted_error;
+                    end
+                end
+                [~, idx] = min(valErrors);
+                bestModel = models(idx);
+            else
+                [~, idx] = min(trainErrors);
+                bestModel = models(idx);
+            end
+
+        case "lowest_training_error"
+            [~, idx] = min(trainErrors);
+            bestModel = models(idx);
+
+        case "simplicity_tolerance"
+            bestTrain = min(trainErrors);
+            eligible = trainErrors <= bestTrain * (1 + relativeTolerance);
+
+            eligibleIdx = find(eligible);
+            eligibleComplexities = complexities(eligibleIdx);
+            minComplexity = min(eligibleComplexities);
+
+            simplestIdx = eligibleIdx(eligibleComplexities == minComplexity);
+
+            if numel(simplestIdx) > 1
+                [~, local] = min(trainErrors(simplestIdx));
+                idx = simplestIdx(local);
+            else
+                idx = simplestIdx;
+            end
+
+            bestModel = models(idx);
+
+        otherwise
+            error("Unknown MODEL_SELECTION_MODE: %s", selectionMode);
+    end
+end
+
+function printFrequencyModel(model)
+    fprintf("  Model type: %s\n", model.model_type);
+    fprintf("  K = %.9g N/us\n", model.K);
+    fprintf("  tau1 = %.6f s\n", model.tau1_s);
+
+    if isfinite(model.tau2_s)
+        fprintf("  tau2 = %.6f s\n", model.tau2_s);
+    end
+
+    fprintf("  delay = %.6f s\n", model.delay_s);
+    fprintf("  training weighted error = %.6f\n", model.train_weighted_error);
+    fprintf("  training magnitude RMSE = %.3f dB\n", model.train_mag_rmse_dB);
+    fprintf("  training phase RMSE = %.3f deg\n", model.train_phase_rmse_deg);
+
+    if isfield(model, "validation_weighted_error")
+        fprintf("  validation weighted error = %.6f\n", model.validation_weighted_error);
+        fprintf("  validation magnitude RMSE = %.3f dB\n", model.validation_mag_rmse_dB);
+        fprintf("  validation phase RMSE = %.3f deg\n", model.validation_phase_rmse_deg);
+    end
+
+    if model.tau1_s > 0
+        fprintf("  dominant bandwidth approx = %.6f rad/s = %.6f Hz\n", ...
+            1/model.tau1_s, 1/(2*pi*model.tau1_s));
+    end
+end
+
+%% ============================================================
+% Plotting functions
+% ============================================================
+
+function plotEmpiricalBodeWithFits(frf, models, bestModel, runName, datasetLabel, minCoherence, plotRejected)
+    f = frf.f_Hz(:);
+    G = frf.G_emp(:);
+    coh = frf.coherence(:);
+
+    good = coh >= minCoherence;
+
+    figure;
+    hold on; grid on;
+
+    if plotRejected && any(~good)
+        semilogx(f(~good), 20*log10(abs(G(~good))), "x", ...
+            "DisplayName", "Rejected empirical points");
+    end
+
+    semilogx(f(good), 20*log10(abs(G(good))), "o", ...
+        "LineWidth", 1.2, ...
+        "DisplayName", "Empirical PRPS FRF");
+
+    fFine = logspace(log10(min(f)), log10(max(f)), 500).';
+    wFine = 2*pi*fFine;
+
+    for i = 1:numel(models)
+        model = models(i);
+        Gfit = evalFrequencyModel(model.model_type, model.params, wFine);
+
+        if string(model.model_type) == string(bestModel.model_type)
+            lw = 2.2;
+            name = "BEST fit: " + model.model_type;
+        else
+            lw = 1.0;
+            name = "Candidate: " + model.model_type;
+        end
+
+        semilogx(fFine, 20*log10(abs(Gfit)), "LineWidth", lw, ...
+            "DisplayName", name);
+    end
+
+    xlabel("Frequency (Hz)");
+    ylabel("Magnitude (dB, N/us)");
+    title("Training Empirical Bode Magnitude with Frequency-Domain Fits - " + runName, ...
+        "Interpreter", "none");
+    legend("Location", "best", "Interpreter", "none");
+
+    figure;
+    hold on; grid on;
+
+    if plotRejected && any(~good)
+        semilogx(f(~good), unwrap(angle(G(~good))) * 180/pi, "x", ...
+            "DisplayName", "Rejected empirical points");
+    end
+
+    semilogx(f(good), unwrap(angle(G(good))) * 180/pi, "o", ...
+        "LineWidth", 1.2, ...
+        "DisplayName", "Empirical PRPS FRF");
+
+    for i = 1:numel(models)
+        model = models(i);
+        Gfit = evalFrequencyModel(model.model_type, model.params, wFine);
+
+        if string(model.model_type) == string(bestModel.model_type)
+            lw = 2.2;
+            name = "BEST fit: " + model.model_type;
+        else
+            lw = 1.0;
+            name = "Candidate: " + model.model_type;
+        end
+
+        semilogx(fFine, unwrap(angle(Gfit)) * 180/pi, "LineWidth", lw, ...
+            "DisplayName", name);
+    end
+
+    xlabel("Frequency (Hz)");
+    ylabel("Phase (deg)");
+    title("Training Empirical Bode Phase with Frequency-Domain Fits - " + runName, ...
+        "Interpreter", "none");
+    legend("Location", "best", "Interpreter", "none");
+end
+
+function plotValidationBodeVsTrainingModel(valFrf, bestModel, runName, minCoherence)
+    f = valFrf.f_Hz(:);
+    G = valFrf.G_emp(:);
+    coh = valFrf.coherence(:);
+
+    good = coh >= minCoherence;
+
+    fFine = logspace(log10(min(f)), log10(max(f)), 500).';
+    wFine = 2*pi*fFine;
+    Gfit = evalFrequencyModel(bestModel.model_type, bestModel.params, wFine);
+
+    figure;
+    hold on; grid on;
+
+    semilogx(f(good), 20*log10(abs(G(good))), "o", ...
+        "LineWidth", 1.2, ...
+        "DisplayName", "Validation empirical FRF");
+
+    if any(~good)
+        semilogx(f(~good), 20*log10(abs(G(~good))), "x", ...
+            "DisplayName", "Validation low-coherence points");
+    end
+
+    semilogx(fFine, 20*log10(abs(Gfit)), "-", ...
+        "LineWidth", 2.0, ...
+        "DisplayName", "Training fitted model");
+
+    xlabel("Frequency (Hz)");
+    ylabel("Magnitude (dB, N/us)");
+    title("Validation Bode vs Training-Fitted Model - Magnitude - " + runName, ...
+        "Interpreter", "none");
+    legend("Location", "best", "Interpreter", "none");
+
+    figure;
+    hold on; grid on;
+
+    semilogx(f(good), unwrap(angle(G(good))) * 180/pi, "o", ...
+        "LineWidth", 1.2, ...
+        "DisplayName", "Validation empirical FRF");
+
+    if any(~good)
+        semilogx(f(~good), unwrap(angle(G(~good))) * 180/pi, "x", ...
+            "DisplayName", "Validation low-coherence points");
+    end
+
+    semilogx(fFine, unwrap(angle(Gfit)) * 180/pi, "-", ...
+        "LineWidth", 2.0, ...
+        "DisplayName", "Training fitted model");
+
+    xlabel("Frequency (Hz)");
+    ylabel("Phase (deg)");
+    title("Validation Bode vs Training-Fitted Model - Phase - " + runName, ...
+        "Interpreter", "none");
+    legend("Location", "best", "Interpreter", "none");
+end
+
+function plotTrainingVsValidationEmpiricalBode(trainFrf, valFrf, runName, minCoherence)
+    trainGood = trainFrf.coherence >= minCoherence;
+    valGood = valFrf.coherence >= minCoherence;
+
+    figure;
+    hold on; grid on;
+
+    semilogx(trainFrf.f_Hz(trainGood), 20*log10(abs(trainFrf.G_emp(trainGood))), "o-", ...
+        "LineWidth", 1.2, ...
+        "DisplayName", "Training empirical");
+
+    semilogx(valFrf.f_Hz(valGood), 20*log10(abs(valFrf.G_emp(valGood))), "s--", ...
+        "LineWidth", 1.2, ...
+        "DisplayName", "Validation empirical");
+
+    xlabel("Frequency (Hz)");
+    ylabel("Magnitude (dB, N/us)");
+    title("Training vs Validation Empirical Bode - Magnitude - " + runName, ...
+        "Interpreter", "none");
+    legend("Location", "best", "Interpreter", "none");
+
+    figure;
+    hold on; grid on;
+
+    semilogx(trainFrf.f_Hz(trainGood), unwrap(angle(trainFrf.G_emp(trainGood))) * 180/pi, "o-", ...
+        "LineWidth", 1.2, ...
+        "DisplayName", "Training empirical");
+
+    semilogx(valFrf.f_Hz(valGood), unwrap(angle(valFrf.G_emp(valGood))) * 180/pi, "s--", ...
+        "LineWidth", 1.2, ...
+        "DisplayName", "Validation empirical");
+
+    xlabel("Frequency (Hz)");
+    ylabel("Phase (deg)");
+    title("Training vs Validation Empirical Bode - Phase - " + runName, ...
+        "Interpreter", "none");
+    legend("Location", "best", "Interpreter", "none");
+end
+
+function plotCoherence(trainFrf, valFrf, runName)
+    figure;
+    hold on; grid on;
+
+    if ~isempty(trainFrf.f_Hz)
+        semilogx(trainFrf.f_Hz, trainFrf.coherence, "o-", ...
+            "LineWidth", 1.2, ...
+            "DisplayName", "Training coherence");
+    end
+
+    if ~isempty(valFrf.f_Hz)
+        semilogx(valFrf.f_Hz, valFrf.coherence, "s--", ...
+            "LineWidth", 1.2, ...
+            "DisplayName", "Validation coherence");
+    end
+
+    yline(0.5, "--", "0.5");
+    yline(0.8, "--", "0.8");
+
+    xlabel("Frequency (Hz)");
+    ylabel("Coherence");
+    title("PRPS Input/Output Coherence - " + runName, "Interpreter", "none");
+    ylim([0 1.05]);
+    legend("Location", "best");
+end
+
+function plotModelComparison(models, runName)
+    names = strings(numel(models), 1);
+    trainErr = zeros(numel(models), 1);
+    valErr = NaN(numel(models), 1);
+
+    for i = 1:numel(models)
+        names(i) = models(i).model_type;
+        trainErr(i) = models(i).train_weighted_error;
+
+        if isfield(models(i), "validation_weighted_error")
+            valErr(i) = models(i).validation_weighted_error;
+        end
+    end
+
+    figure;
+    hold on; grid on;
+
+    X = categorical(names);
+    X = reordercats(X, cellstr(names));
+
+    if any(isfinite(valErr))
+        bar(X, [trainErr, valErr]);
+        legend("Training", "Validation", "Location", "best");
+    else
+        bar(X, trainErr);
+    end
+
+    ylabel("Weighted complex FRF error");
+    title("Frequency-Domain Model Comparison - " + runName, "Interpreter", "none");
+end
+
+function plotTimeDomainTranslationForDataset( ...
+    D, ...
+    bestModel, ...
+    candidateModels, ...
+    runName, ...
+    datasetLabel, ...
+    centerSignals, ...
+    plotBestOnly, ...
+    plotAllModels)
+
+    if isempty(D) || height(D) < 5
+        return;
+    end
+
+    groups = getTimeGroups(D);
+    uniqueGroups = unique(groups, "stable");
+
+    for g = 1:numel(uniqueGroups)
+        idx = find(groups == uniqueGroups(g));
+        Dg = D(idx, :);
+
+        tRaw = forceNumeric(Dg.t_ms) / 1000;
+        uRaw = forceNumeric(Dg.pwm_us);
+        yRaw = forceNumeric(Dg.force_N);
+
+        valid = isfinite(tRaw) & isfinite(uRaw) & isfinite(yRaw);
+        tRaw = tRaw(valid);
+        uRaw = uRaw(valid);
+        yRaw = yRaw(valid);
+
+        if numel(tRaw) < 5
+            continue;
+        end
+
+        tRaw = tRaw - tRaw(1);
+
+        % Remove duplicate timestamps.
+        [tRaw, uniqueIdx] = unique(tRaw, "stable");
+        uRaw = uRaw(uniqueIdx);
+        yRaw = yRaw(uniqueIdx);
+
+        % lsim requires evenly spaced time samples.
+        dt = median(diff(tRaw), "omitnan");
+
+        if ~isfinite(dt) || dt <= 0
+            warning("Skipping time-domain translation for %s %s: invalid dt.", datasetLabel, runName);
+            continue;
+        end
+
+        tUniform = (0:dt:tRaw(end)).';
+
+        if numel(tUniform) < 5
+            continue;
+        end
+
+        uUniform = interp1(tRaw, uRaw, tUniform, "linear", "extrap");
+        yUniform = interp1(tRaw, yRaw, tUniform, "linear", "extrap");
+
+        if centerSignals
+            uInput = uUniform - mean(uUniform, "omitnan");
+            yOffset = mean(yUniform, "omitnan");
+        else
+            uInput = uUniform;
+            yOffset = 0;
+        end
+
+        figure;
+        hold on; grid on;
+
+        plot(tUniform, yUniform, "LineWidth", 1.2, ...
+            "DisplayName", "Measured thrust");
+
+        if plotBestOnly
+            sys = makeTransferFunction(bestModel);
+
+            try
+                yModel = lsim(sys, uInput, tUniform) + yOffset;
+
+                plot(tUniform, yModel, "--", "LineWidth", 1.8, ...
+                    "DisplayName", "Best frequency-fit model: " + bestModel.model_type);
+            catch ME
+                warning("lsim failed for best model %s / %s: %s", ...
+                    datasetLabel, runName, ME.message);
+            end
+        end
+
+        if plotAllModels
+            for m = 1:numel(candidateModels)
+                sys = makeTransferFunction(candidateModels(m));
+
+                try
+                    yModel = lsim(sys, uInput, tUniform) + yOffset;
+
+                    plot(tUniform, yModel, "--", "LineWidth", 1.0, ...
+                        "DisplayName", candidateModels(m).model_type);
+                catch ME
+                    warning("lsim failed for candidate model %s / %s / %s: %s", ...
+                        candidateModels(m).model_type, datasetLabel, runName, ME.message);
+                end
+            end
+        end
+
+        xlabel("Time (s)");
+        ylabel("Thrust (N)");
+        title("Time-Domain Translation of Frequency Fit - " + datasetLabel + ...
+            " - " + runName + " - group " + string(uniqueGroups(g)), ...
+            "Interpreter", "none");
+        legend("Location", "best", "Interpreter", "none");
+
+        % Usually one group plot is enough to avoid figure explosion.
+        break;
+    end
+end
+
+function groups = getTimeGroups(D)
+    if ismember("source_file_index", string(D.Properties.VariableNames))
+        groups = double(D.source_file_index);
+    elseif ismember("set_index", string(D.Properties.VariableNames))
+        groups = double(D.set_index);
+    else
+        groups = ones(height(D), 1);
+    end
+end
+
+function plotRawTimeSnippet(D, runName, datasetLabel)
+    t = forceNumeric(D.t_ms) / 1000;
+    u = forceNumeric(D.pwm_us);
+    y = forceNumeric(D.force_N);
+
+    figure;
+    hold on; grid on;
+
+    yyaxis left;
+    plot(t, y, "LineWidth", 1.1);
+    ylabel("Thrust (N)");
+
+    yyaxis right;
+    plot(t, u, "LineWidth", 1.1);
+    ylabel("PWM (\mus)");
+
+    xlabel("Time (s)");
+    title("Raw PRPS Time Snippet - " + datasetLabel + " - " + runName, ...
+        "Interpreter", "none");
+end
+
+function plotInputSpectrumDiagnostic(frf, runName, datasetLabel)
+    figure;
+    hold on; grid on;
+
+    scatter(frf.raw_f_Hz, abs(frf.raw_U), 20, "filled");
+
+    xlabel("Frequency (Hz)");
+    ylabel("|U|");
+    title("Input Spectrum Diagnostic - " + datasetLabel + " - " + runName, ...
+        "Interpreter", "none");
+end
+
+function plotSampleTimeDiagnostic(D, runName, datasetLabel)
+    t = forceNumeric(D.t_ms) / 1000;
+
+    figure;
+    hold on; grid on;
+
+    plot(t(2:end), diff(t), "LineWidth", 1.1);
+
+    xlabel("Time (s)");
+    ylabel("Sample interval \Deltat (s)");
+    title("Sample-Time Diagnostic - " + datasetLabel + " - " + runName, ...
+        "Interpreter", "none");
+end
+
+function plotVoltageTime(D, runName, datasetLabel)
+    if ~hasVoltage(D)
+        return;
+    end
+
+    t = forceNumeric(D.t_ms) / 1000;
+    V = forceNumeric(D.battery_voltage_V);
+
+    figure;
+    hold on; grid on;
+
+    plot(t, V, "LineWidth", 1.1);
+
+    xlabel("Time (s)");
+    ylabel("Battery voltage (V)");
+    title("Battery Voltage During PRPS - " + datasetLabel + " - " + runName, ...
+        "Interpreter", "none");
+end
+
+%% ============================================================
+% General table / utility helpers
+% ============================================================
+
+function T = readCombinedCsvTables(csvFileStruct)
+    tables = cell(numel(csvFileStruct), 1);
+    allVarNames = strings(0, 1);
+
+    for k = 1:numel(csvFileStruct)
+        thisPath = fullfile(csvFileStruct(k).folder, csvFileStruct(k).name);
+        Tk = readtable(thisPath);
+
+        Tk.source_file = repmat(string(csvFileStruct(k).name), height(Tk), 1);
+        Tk.source_file_index = repmat(k, height(Tk), 1);
+
+        tables{k} = Tk;
+        allVarNames = union(allVarNames, string(Tk.Properties.VariableNames), "stable");
+    end
+
+    for k = 1:numel(tables)
+        Tk = tables{k};
+        currentVars = string(Tk.Properties.VariableNames);
+
+        for v = 1:numel(allVarNames)
+            varName = allVarNames(v);
+
+            if ~ismember(varName, currentVars)
+                if any(varName == ["source_file", "run_name", "phase", "segment"])
+                    Tk.(varName) = repmat("", height(Tk), 1);
+                else
+                    Tk.(varName) = NaN(height(Tk), 1);
+                end
+            end
+        end
+
+        Tk = Tk(:, cellstr(allVarNames));
+        tables{k} = Tk;
+    end
+
+    T = vertcat(tables{:});
+end
+
+function label = makeFileListLabel(csvFileStruct)
+    names = strings(numel(csvFileStruct), 1);
+
+    for k = 1:numel(csvFileStruct)
+        names(k) = string(csvFileStruct(k).name);
+    end
+
+    if numel(names) == 1
+        label = names(1);
+    else
+        label = "combined_" + string(numel(names)) + "_files";
+    end
+end
+
+function tf = hasVoltage(D)
+    tf = ismember("battery_voltage_V", string(D.Properties.VariableNames)) && ...
+         any(isfinite(forceNumeric(D.battery_voltage_V)));
+end
+
+function x = forceNumeric(x)
+    if isnumeric(x)
+        return;
+    end
+
+    if iscell(x)
+        x = string(x);
+    end
+
+    if isstring(x) || ischar(x) || iscategorical(x)
+        x = str2double(string(x));
+        return;
+    end
+
+    try
+        x = double(x);
+    catch
+        x = NaN(size(x));
+    end
+end
+
+function value = getfieldwithdefault(s, fieldName, defaultValue)
+    if isfield(s, fieldName)
+        value = s.(fieldName);
+    else
+        value = defaultValue;
+    end
+end
+
+function frf = emptyFrf()
+    frf.f_Hz = [];
+    frf.w_rad_s = [];
+    frf.G_emp = [];
+    frf.coherence = [];
+    frf.Suu = [];
+    frf.Syy = [];
+    frf.Syu = [];
+    frf.n_avg = [];
+    frf.run_name = "";
+    frf.dataset_label = "";
+    frf.raw_U = [];
+    frf.raw_Y = [];
+    frf.raw_f_Hz = [];
+    frf.raw_bins = [];
+    frf.raw_file_index = [];
+    frf.raw_period_index = [];
+end

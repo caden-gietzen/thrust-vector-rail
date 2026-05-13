@@ -27,7 +27,7 @@ import urandom
 
 # Output file on Pico. The PC run-and-pull tool mirrors this into data/raw
 # based on this script's repository path.
-LOG_FILE = "thrust_prbs_daq.csv"
+LOG_FILE = "thrust_prbs_daq_no_voltage.csv"
 
 # HX711 pins
 HX711_DAT_PIN = 20

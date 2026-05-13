@@ -1,4 +1,4 @@
-%% analyze_thrust_prbs_daq.m
+%% analyze_thrust_prbs_daq_no_voltage.m
 % Analyze thrust PRBS DAQ files.
 %
 % Expected CSV columns:
