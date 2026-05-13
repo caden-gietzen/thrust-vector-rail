@@ -11,8 +11,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 FIRMWARE_ROOT = REPO_ROOT / "firmware" / "pico_micropython"
 DATA_RAW_ROOT = REPO_ROOT / "data" / "raw"
 
-SAVED_FILE_PATTERN = re.compile(r"Saved:\s*(.+\.csv)")
-
+SAVED_FILE_PATTERN = re.compile(r"Saved:\s*([^\s]+\.csv)")
 
 def run_command(command, cwd=None, show_output=True):
     """
@@ -145,22 +144,33 @@ def find_pico_port():
     )
 
 
-def find_saved_csv_name(output_text):
+def find_saved_csv_names(output_text):
     """
-    Extracts the CSV filename from a line like:
+    Extracts all CSV filenames from lines like:
 
-        Saved: servo_sweep_2026-05-10_run001.csv
+        Saved: servo_prps_set01_seed4001.csv
+        Saved: servo_prps_set02_seed4002.csv
+        Saved: servo_prps_set03_seed4003.csv
 
     Returns:
-        filename string if found
-        None if no CSV was saved
+        list[str] of unique filenames in detected order
     """
     matches = SAVED_FILE_PATTERN.findall(output_text)
 
-    if not matches:
-        return None
+    saved_names = []
+    seen = set()
 
-    return matches[-1].strip()
+    for match in matches:
+        name = match.strip()
+
+        # Defensive cleanup in case the print line has extra whitespace.
+        name = Path(name).name
+
+        if name not in seen:
+            saved_names.append(name)
+            seen.add(name)
+
+    return saved_names
 
 
 def get_data_output_dir(pico_script_path):
@@ -328,34 +338,43 @@ def main():
     if return_code != 0:
         raise RuntimeError("Pico script failed. Not pulling CSV.")
 
-    # Step 2: Parse the filename printed by the Pico, if one exists.
-    saved_csv_name = find_saved_csv_name(output_text)
+    # Step 2: Parse all filenames printed by the Pico, if any exist.
+    saved_csv_names = find_saved_csv_names(output_text)
 
-    if saved_csv_name is None:
-        print("\nNo CSV output file detected.")
-        print("Pico script completed successfully, but no file was pulled.")
+    if not saved_csv_names:
+        print("\nNo CSV output files detected.")
+        print("Pico script completed successfully, but no files were pulled.")
         return
 
-    print("\nDetected saved CSV:")
-    print(f"  {saved_csv_name}")
+    print("\nDetected saved CSV files:")
+    for name in saved_csv_names:
+        print(f"  {name}")
 
-    # Step 3: Build a unique local filename using laptop date + next unused index.
-    local_csv_path = make_unique_local_csv_path(output_dir, saved_csv_name)
+    pulled_paths = []
 
-    print("\nLocal CSV will be saved as:")
-    print(f"  {local_csv_path.name}")
+    # Step 3-5: Pull each CSV into the mirrored local data/raw folder,
+    # then remove it from the Pico after successful copy.
+    for saved_csv_name in saved_csv_names:
+        local_csv_path = make_unique_local_csv_path(output_dir, saved_csv_name)
 
-    # Step 4: Pull that CSV into the mirrored local data/raw folder.
-    pull_file_from_pico(saved_csv_name, local_csv_path, port)
+        print("\nLocal CSV will be saved as:")
+        print(f"  {local_csv_path.name}")
 
-    print("\nPulled CSV to:")
-    print(f"  {local_csv_path}")
+        pull_file_from_pico(saved_csv_name, local_csv_path, port)
 
-    # Step 5: Remove the CSV from the Pico only after the local pull succeeds.
-    remove_file_from_pico(saved_csv_name, port)
+        print("\nPulled CSV to:")
+        print(f"  {local_csv_path}")
 
-    print("\nRemoved CSV from Pico:")
-    print(f"  {saved_csv_name}")
+        remove_file_from_pico(saved_csv_name, port)
+
+        print("\nRemoved CSV from Pico:")
+        print(f"  {saved_csv_name}")
+
+        pulled_paths.append(local_csv_path)
+
+    print("\nAll detected CSV files pulled:")
+    for path in pulled_paths:
+        print(f"  {path}")
 
 
 if __name__ == "__main__":
