@@ -140,7 +140,7 @@ SIMPLE_MODEL_RELATIVE_TOLERANCE = 0.01;
 
 scriptPath = mfilename("fullpath");
 
-dataDir = getMirroredRawDataDir(scriptPath);
+dataDir = getMirroredRawDataDir(scriptPath, "candidate");
 plotDir = getMirroredPlotDir(scriptPath);
 
 addpath(genpath(fullfile(findRepoRoot(scriptPath), "analysis", "util")));

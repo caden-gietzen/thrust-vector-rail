@@ -72,15 +72,12 @@ trainingFile = "thrust_prps_daq_voltage_set01_seed2001.csv";
 %% User options
 % ============================================================
 
-SAVE_FIGURES = true;
+SAVE_FIGURES = false;
 
 runNames = [
     "global_1100_1950"
-
-    "local_1100_1350"
     "local_1400_1650"
-    "local_1700_1950"
-    "local_1400_1950"
+    "local_1700_1850"
 ];
 
 USE_NOMINAL_COMMAND_DT_FOR_FRF = true;
@@ -159,7 +156,7 @@ FIT_SECOND_ORDER_LAG_DELAY      = true;
 %   "lowest_validation_error" = prefer validation if available
 %   "lowest_training_error"   = choose best training fit
 %   "simplicity_tolerance"    = simplest model within tolerance of best training fit
-MODEL_SELECTION_MODE = "simplicity_tolerance";
+MODEL_SELECTION_MODE = "lowest_training_error";
 
 % If simplicity mode is used, choose simplest model whose weighted training
 % error is within this relative tolerance of the best model.
@@ -215,14 +212,14 @@ USE_RAW_TIMESTAMP_GRID_FOR_LSIM = true;
 % Initially leave only the most telling plots true.
 % ============================================================
 
-PLOT_TRAINING_EMPIRICAL_BODE_WITH_FITS      = false;
-PLOT_VALIDATION_BODE_VS_TRAINING_MODEL      = false;
+PLOT_TRAINING_EMPIRICAL_BODE_WITH_FITS      = true;
+PLOT_VALIDATION_BODE_VS_TRAINING_MODEL      = true;
 PLOT_TRAINING_VS_VALIDATION_EMPIRICAL_BODE  = false;
 PLOT_COHERENCE_BY_RUN                       = false;
 PLOT_MODEL_COMPARISON_BAR                   = false;
 
-PLOT_TIME_DOMAIN_TRANSLATION_BEST_ONLY      = true;
-PLOT_ALL_TIME_DOMAIN_MODEL_TRANSLATIONS     = false;
+PLOT_TIME_DOMAIN_TRANSLATION_BEST_ONLY      = false;
+PLOT_ALL_TIME_DOMAIN_MODEL_TRANSLATIONS     = true;
 
 PLOT_RAW_PRPS_TIME_SNIPPET                  = false;
 PLOT_INPUT_SPECTRUM_DIAGNOSTIC              = false;
@@ -232,14 +229,6 @@ PLOT_VOLTAGE_TIME                           = false;
 
 PLOT_PHASE_RESIDUAL_BY_FREQUENCY            = false;
 PLOT_NORMALIZED_BODE_MAGNITUDE              = false;
-
-PLOT_VALIDATION_BEST_FIT_TIME_WINDOW        = true;
-VALIDATION_BEST_FIT_TIME_WINDOW_S          = [60, 70];
-
-% Usually keep false at first to avoid figure explosion.
-% false = plot first validation group/file only for each run.
-% true  = plot every validation group/file for each run.
-PLOT_ALL_VALIDATION_TIME_WINDOW_GROUPS      = false;
 
 %% Locate mirrored folders and select train/validation files
 % ============================================================
@@ -341,12 +330,9 @@ end
 % ============================================================
 
 allSummaryRows = [];
-allBestRows = [];
-
 bestModels = struct();
 trainingFrfs = struct();
 validationFrfs = struct();
-candidateModelSets = struct();
 
 for r = 1:numel(runNames)
     runName = runNames(r);
@@ -482,39 +468,16 @@ for r = 1:numel(runNames)
 
     bestModels.(modelKey) = bestModel;
 
-    candidateModelSets.(modelKey) = candidateModels;
-
-    allBestRows = [allBestRows; {
-        trainingLabel, ...
-        runName, ...
-        bestModel.model_type, ...
-        bestModel.complexity, ...
-        bestModel.K, ...
-        bestModel.tau1_s, ...
-        bestModel.tau2_s, ...
-        bestModel.delay_s, ...
-        bestModel.train_weighted_error, ...
-        getfieldwithdefault(bestModel, "validation_weighted_error", NaN), ...
-        bestModel.train_mag_rmse_dB, ...
-        bestModel.train_phase_rmse_deg, ...
-        getfieldwithdefault(bestModel, "validation_mag_rmse_dB", NaN), ...
-        getfieldwithdefault(bestModel, "validation_phase_rmse_deg", NaN), ...
-        bandwidthHzFromTau(bestModel.tau1_s)
-    }];
-
     fprintf("\nBest model for %s:\n", runName);
     printFrequencyModel(bestModel);
 
     for m = 1:numel(candidateModels)
         cm = candidateModels(m);
 
-        isBestModel = string(cm.model_type) == string(bestModel.model_type);
-
         allSummaryRows = [allSummaryRows; {
             trainingLabel, ...
             runName, ...
             cm.model_type, ...
-            isBestModel, ...
             cm.complexity, ...
             cm.K, ...
             cm.tau1_s, ...
@@ -525,8 +488,7 @@ for r = 1:numel(runNames)
             cm.train_mag_rmse_dB, ...
             cm.train_phase_rmse_deg, ...
             getfieldwithdefault(cm, "validation_mag_rmse_dB", NaN), ...
-            getfieldwithdefault(cm, "validation_phase_rmse_deg", NaN), ...
-            bandwidthHzFromTau(cm.tau1_s)
+            getfieldwithdefault(cm, "validation_phase_rmse_deg", NaN)
         }];
     end
 
@@ -570,7 +532,6 @@ for r = 1:numel(runNames)
             USE_RAW_TIMESTAMP_GRID_FOR_LSIM);
     end
 
-    
     if PLOT_TIME_DOMAIN_TRANSLATION_VALIDATION && ~isempty(Tval)
         DvalTime = getRunData(Tval, runName, USE_ONLY_PRPS_PHASE);
 
@@ -587,21 +548,6 @@ for r = 1:numel(runNames)
                 USE_RAW_TIMESTAMP_GRID_FOR_LSIM);
         end
     end
-
-        if PLOT_VALIDATION_BEST_FIT_TIME_WINDOW && ~isempty(Tval)
-            DvalWindow = getRunData(Tval, runName, USE_ONLY_PRPS_PHASE);
-    
-            if height(DvalWindow) >= MIN_SAMPLES_PER_PERIOD
-                plotValidationBestFitTimeWindow( ...
-                    DvalWindow, ...
-                    bestModel, ...
-                    runName, ...
-                    VALIDATION_BEST_FIT_TIME_WINDOW_S, ...
-                    CENTER_TIME_DOMAIN_SIGNALS, ...
-                    USE_RAW_TIMESTAMP_GRID_FOR_LSIM, ...
-                    PLOT_ALL_VALIDATION_TIME_WINDOW_GROUPS);
-            end
-        end
 
     if PLOT_SAMPLE_TIME_DIAGNOSTIC
         plotSampleTimeDiagnostic(Dtrain, runName, "training");
@@ -620,7 +566,7 @@ for r = 1:numel(runNames)
 end
 end
 
-%% Summary tables and cross-region parameter comparisons
+%% Summary table
 % ============================================================
 
 if ~isempty(allSummaryRows)
@@ -629,7 +575,6 @@ if ~isempty(allSummaryRows)
             'file', ...
             'run_name', ...
             'model_type', ...
-            'is_best_model', ...
             'complexity', ...
             'K_N_per_us', ...
             'tau1_s', ...
@@ -640,54 +585,14 @@ if ~isempty(allSummaryRows)
             'train_mag_rmse_dB', ...
             'train_phase_rmse_deg', ...
             'validation_mag_rmse_dB', ...
-            'validation_phase_rmse_deg', ...
-            'dominant_bandwidth_Hz' ...
+            'validation_phase_rmse_deg' ...
         });
 
-    disp("Frequency-domain model summary, all candidate models:");
+    disp("Frequency-domain model summary:");
     disp(summaryTable);
-
-    bestModelTable = cell2table(allBestRows, ...
-        'VariableNames', { ...
-            'file', ...
-            'run_name', ...
-            'best_model_type', ...
-            'complexity', ...
-            'K_N_per_us', ...
-            'tau1_s', ...
-            'tau2_s', ...
-            'delay_s', ...
-            'train_weighted_error', ...
-            'validation_weighted_error', ...
-            'train_mag_rmse_dB', ...
-            'train_phase_rmse_deg', ...
-            'validation_mag_rmse_dB', ...
-            'validation_phase_rmse_deg', ...
-            'dominant_bandwidth_Hz' ...
-        });
-
-    disp("Best model selected for each global/local region:");
-    disp(bestModelTable);
-
-    fprintf("\n============================================================\n");
-    fprintf("Cross-region parameter comparison by model type\n");
-    fprintf("Use this to check whether only K changes, or whether tau/delay also move.\n");
-    fprintf("============================================================\n");
-
-    compareParametersAcrossRegions(summaryTable, runNames);
-
-    fprintf("\n============================================================\n");
-    fprintf("Best-model parameter comparison across regions\n");
-    fprintf("This compares only the selected best model for each run.\n");
-    fprintf("Be careful: model structures may differ, so K/tau/delay are not always apples-to-apples.\n");
-    fprintf("============================================================\n");
-
-    compareBestModelsAcrossRegions(bestModelTable);
-
 else
     fprintf("\nNo frequency-domain models generated.\n");
 end
-
 
 %% Save figures
 % ============================================================
@@ -1662,166 +1567,6 @@ function printSamplingRateDiagnostic(D, runName, datasetLabel)
     fprintf("  Nyquist from median fs  = %.3f Hz\n", fs_median / 2);
 end
 
-function bwHz = bandwidthHzFromTau(tau_s)
-    if isfinite(tau_s) && tau_s > 0
-        bwHz = 1 / (2*pi*tau_s);
-    else
-        bwHz = NaN;
-    end
-end
-
-function compareParametersAcrossRegions(summaryTable, runNames)
-    modelTypes = unique(string(summaryTable.model_type), "stable");
-
-    for mt = 1:numel(modelTypes)
-        modelType = modelTypes(mt);
-
-        rows = summaryTable(string(summaryTable.model_type) == modelType, :);
-
-        if isempty(rows)
-            continue;
-        end
-
-        fprintf("\n------------------------------------------------------------\n");
-        fprintf("Model type: %s\n", modelType);
-        fprintf("------------------------------------------------------------\n");
-
-        rows = sortRowsByRunOrder(rows, runNames);
-
-        comparisonTable = rows(:, { ...
-            'run_name', ...
-            'K_N_per_us', ...
-            'tau1_s', ...
-            'tau2_s', ...
-            'delay_s', ...
-            'dominant_bandwidth_Hz', ...
-            'train_weighted_error', ...
-            'validation_weighted_error', ...
-            'train_mag_rmse_dB', ...
-            'train_phase_rmse_deg', ...
-            'validation_mag_rmse_dB', ...
-            'validation_phase_rmse_deg', ...
-            'is_best_model' ...
-        });
-
-        disp(comparisonTable);
-
-        printParameterSpreadDiagnostics(rows, modelType);
-    end
-end
-
-function compareBestModelsAcrossRegions(bestModelTable)
-    rows = bestModelTable;
-
-    comparisonTable = rows(:, { ...
-        'run_name', ...
-        'best_model_type', ...
-        'K_N_per_us', ...
-        'tau1_s', ...
-        'tau2_s', ...
-        'delay_s', ...
-        'dominant_bandwidth_Hz', ...
-        'train_weighted_error', ...
-        'validation_weighted_error', ...
-        'train_mag_rmse_dB', ...
-        'train_phase_rmse_deg', ...
-        'validation_mag_rmse_dB', ...
-        'validation_phase_rmse_deg' ...
-    });
-
-    disp(comparisonTable);
-
-    fprintf("\nBest-model spread diagnostics:\n");
-    printParameterSpreadDiagnosticsForBestModels(rows);
-end
-
-function rowsOut = sortRowsByRunOrder(rowsIn, runNames)
-    runOrder = NaN(height(rowsIn), 1);
-
-    for i = 1:height(rowsIn)
-        idx = find(string(runNames) == string(rowsIn.run_name(i)), 1, "first");
-
-        if isempty(idx)
-            runOrder(i) = 9999 + i;
-        else
-            runOrder(i) = idx;
-        end
-    end
-
-    rowsIn.run_order_for_sorting = runOrder;
-    rowsIn = sortrows(rowsIn, "run_order_for_sorting");
-    rowsIn.run_order_for_sorting = [];
-
-    rowsOut = rowsIn;
-end
-
-function printParameterSpreadDiagnostics(rows, modelType)
-    K = rows.K_N_per_us;
-    tau1 = rows.tau1_s;
-    tau2 = rows.tau2_s;
-    delay = rows.delay_s;
-
-    fprintf("Parameter spread for %s:\n", modelType);
-    printOneSpread("K_N_per_us", K, "N/us");
-    printOneSpread("tau1_s", tau1, "s");
-    printOneSpread("tau2_s", tau2, "s");
-    printOneSpread("delay_s", delay, "s");
-
-    globalIdx = find(contains(string(rows.run_name), "global"), 1, "first");
-
-    if ~isempty(globalIdx)
-        fprintf("Ratios relative to global model:\n");
-
-        for i = 1:height(rows)
-            fprintf("  %s:\n", string(rows.run_name(i)));
-            printRatioToReference("K", rows.K_N_per_us(i), rows.K_N_per_us(globalIdx));
-            printRatioToReference("tau1", rows.tau1_s(i), rows.tau1_s(globalIdx));
-            printRatioToReference("tau2", rows.tau2_s(i), rows.tau2_s(globalIdx));
-            printRatioToReference("delay", rows.delay_s(i), rows.delay_s(globalIdx));
-        end
-    end
-end
-
-function printParameterSpreadDiagnosticsForBestModels(rows)
-    fprintf("These spreads mix model structures if different best models were selected.\n");
-    fprintf("Use the per-model-type tables above for cleaner apples-to-apples comparison.\n");
-
-    printOneSpread("K_N_per_us", rows.K_N_per_us, "N/us");
-    printOneSpread("tau1_s", rows.tau1_s, "s");
-    printOneSpread("tau2_s", rows.tau2_s, "s");
-    printOneSpread("delay_s", rows.delay_s, "s");
-end
-
-function printOneSpread(name, x, units)
-    x = x(isfinite(x));
-
-    if isempty(x)
-        fprintf("  %s: no finite values\n", name);
-        return;
-    end
-
-    xMin = min(x);
-    xMax = max(x);
-    xMean = mean(x, "omitnan");
-
-    if abs(xMean) > eps
-        pctSpread = 100 * (xMax - xMin) / abs(xMean);
-    else
-        pctSpread = NaN;
-    end
-
-    fprintf("  %s: min = %.6g %s, max = %.6g %s, mean = %.6g %s, spread = %.2f %% of mean\n", ...
-        name, xMin, units, xMax, units, xMean, units, pctSpread);
-end
-
-function printRatioToReference(name, value, reference)
-    if isfinite(value) && isfinite(reference) && abs(reference) > eps
-        fprintf("    %s ratio = %.4f\n", name, value / reference);
-    else
-        fprintf("    %s ratio = NaN\n", name);
-    end
-end
-
 %% Plotting functions
 % ============================================================
 
@@ -2103,7 +1848,7 @@ function plotTimeDomainTranslationForDataset( ...
             uRaw, ...
             yRaw, ...
             useRawTimestampGridForLsim);
-
+        
         if numel(tUniform) < 5
             continue;
         end
@@ -2119,19 +1864,25 @@ function plotTimeDomainTranslationForDataset( ...
         figure;
         hold on; grid on;
 
-        % Plot measured thrust once.
         plot(tUniform, yUniform, "LineWidth", 1.2, ...
             "DisplayName", "Measured thrust");
 
-        if plotBestOnly && ~plotAllModels
+        if plotBestOnly
             sys = makeTransferFunction(bestModel);
 
             try
                 yModel = lsim(sys, uInput, tUniform) + yOffset;
 
-                plot(tUniform, yModel, "--", "LineWidth", 1.8, ...
+                yModelAtRawTime = interp1(tUniform, yModel, tRaw, "linear", "extrap");
+                
+                plot(tRaw, yRaw, "LineWidth", 1.2, ...
+                    "DisplayName", "Measured thrust");
+                
+                plot(tRaw, yModelAtRawTime, "--", "LineWidth", 1.8, ...
                     "DisplayName", "Best frequency-fit model: " + bestModel.model_type);
 
+                plot(tUniform, yModel, "--", "LineWidth", 1.8, ...
+                    "DisplayName", "Best frequency-fit model: " + bestModel.model_type);
             catch ME
                 warning("lsim failed for best model %s / %s: %s", ...
                     datasetLabel, runName, ME.message);
@@ -2145,21 +1896,21 @@ function plotTimeDomainTranslationForDataset( ...
                 try
                     yModel = lsim(sys, uInput, tUniform) + yOffset;
 
-                    if string(candidateModels(m).model_type) == string(bestModel.model_type)
-                        lineWidth = 1.8;
-                        modelLabel = "BEST: " + candidateModels(m).model_type;
-                    else
-                        lineWidth = 1.0;
-                        modelLabel = "Candidate: " + candidateModels(m).model_type;
-                    end
+                    yModelAtRawTime = interp1(tUniform, yModel, tRaw, "linear", "extrap");
+                    
+                    plot(tRaw, yRaw, "LineWidth", 1.2, ...
+                        "DisplayName", "Measured thrust");
+                    
+                    plot(tRaw, yModelAtRawTime, "--", "LineWidth", 1.8, ...
+                        "DisplayName", "Best frequency-fit model: " + bestModel.model_type);
 
-                    plot(tUniform, yModel, "--", "LineWidth", lineWidth, ...
-                        "DisplayName", modelLabel);
-
+                    plot(tUniform, yModel, "--", "LineWidth", 1.0, ...
+                        "DisplayName", candidateModels(m).model_type);
                 catch ME
                     warning("lsim failed for candidate model %s / %s / %s: %s", ...
                         candidateModels(m).model_type, datasetLabel, runName, ME.message);
                 end
+
             end
         end
 
@@ -2168,14 +1919,12 @@ function plotTimeDomainTranslationForDataset( ...
         title("Time-Domain Translation of Frequency Fit - " + datasetLabel + ...
             " - " + runName + " - group " + string(uniqueGroups(g)), ...
             "Interpreter", "none");
-
         legend("Location", "best", "Interpreter", "none");
 
         % Usually one group plot is enough to avoid figure explosion.
         break;
     end
 end
-
 
 function groups = getTimeGroups(D)
     if ismember("source_file_index", string(D.Properties.VariableNames))
@@ -2428,136 +2177,6 @@ function plotNormalizedBodeMagnitude(frf, models, bestModel, runName, datasetLab
         "Interpreter", "none");
 
     legend("Location", "best", "Interpreter", "none");
-end
-
-function plotValidationBestFitTimeWindow( ...
-    D, ...
-    bestModel, ...
-    runName, ...
-    timeWindow_s, ...
-    centerSignals, ...
-    useRawTimestampGridForLsim, ...
-    plotAllGroups)
-
-    if isempty(D) || height(D) < 5
-        return;
-    end
-
-    if numel(timeWindow_s) ~= 2 || timeWindow_s(2) <= timeWindow_s(1)
-        error("timeWindow_s must be [t_start, t_end] with t_end > t_start.");
-    end
-
-    tStart_s = timeWindow_s(1);
-    tEnd_s   = timeWindow_s(2);
-
-    groups = getTimeGroups(D);
-    uniqueGroups = unique(groups, "stable");
-
-    for g = 1:numel(uniqueGroups)
-        idx = find(groups == uniqueGroups(g));
-        Dg = D(idx, :);
-
-        tRaw = forceNumeric(Dg.t_ms) / 1000;
-        uRaw = forceNumeric(Dg.pwm_us);
-        yRaw = forceNumeric(Dg.force_N);
-
-        valid = isfinite(tRaw) & isfinite(uRaw) & isfinite(yRaw);
-        tRaw = tRaw(valid);
-        uRaw = uRaw(valid);
-        yRaw = yRaw(valid);
-
-        if numel(tRaw) < 5
-            continue;
-        end
-
-        tRaw = tRaw - tRaw(1);
-
-        % Remove duplicate timestamps.
-        [tRaw, uniqueIdx] = unique(tRaw, "stable");
-        uRaw = uRaw(uniqueIdx);
-        yRaw = yRaw(uniqueIdx);
-
-        [tUniform, uUniform, yUniform, dtUsed] = makeLsimUniformGridFromRawTimestamps( ...
-            tRaw, ...
-            uRaw, ...
-            yRaw, ...
-            useRawTimestampGridForLsim);
-
-        if numel(tUniform) < 5
-            continue;
-        end
-
-        % Important:
-        % Simulate the full validation record first, then crop.
-        % This avoids giving the model a fake initial-condition reset at 60 s.
-        if centerSignals
-            uInput = uUniform - mean(uUniform, "omitnan");
-            yOffset = mean(yUniform, "omitnan");
-        else
-            uInput = uUniform;
-            yOffset = 0;
-        end
-
-        sys = makeTransferFunction(bestModel);
-
-        try
-            yModel = lsim(sys, uInput, tUniform) + yOffset;
-        catch ME
-            warning("lsim failed for validation time-window plot %s / group %s: %s", ...
-                runName, string(uniqueGroups(g)), ME.message);
-            continue;
-        end
-
-        windowMask = tUniform >= tStart_s & tUniform <= tEnd_s;
-
-        if nnz(windowMask) < 5
-            warning("Skipping %s / group %s: fewer than 5 samples in %.2f to %.2f s window.", ...
-                runName, string(uniqueGroups(g)), tStart_s, tEnd_s);
-            continue;
-        end
-
-        tPlot = tUniform(windowMask);
-        uPlot = uUniform(windowMask);
-        yPlot = yUniform(windowMask);
-        yModelPlot = yModel(windowMask);
-
-        err = yPlot - yModelPlot;
-        rmse_N = sqrt(mean(err.^2, "omitnan"));
-        relRmse_pct = 100 * rmse_N / max(range(yPlot), eps);
-
-        figure;
-        hold on; grid on;
-
-        %yyaxis left;
-        plot(tPlot, yPlot, "LineWidth", 1.3, ...
-            "DisplayName", "Measured thrust");
-
-        plot(tPlot, yModelPlot, "g--", "LineWidth", 1.8, ...
-            "DisplayName", "Best fit model: " + bestModel.model_type);
-
-        ylabel("Thrust (N)");
-
-        %yyaxis right;
-        %plot(tPlot, uPlot, ":", "LineWidth", 1.0, ...
-        %    "DisplayName", "PWM command");
-        %ylabel("PWM command (\mus)");
-
-        xlabel("Time (s)");
-
-        title( ...
-            "Validation Best-Fit Time Window - " + runName + ...
-            " - group " + string(uniqueGroups(g)) + ...
-            " - " + string(tStart_s) + " to " + string(tEnd_s) + " s" + ...
-            " - RMSE = " + string(sprintf("%.4f", rmse_N)) + " N" + ...
-            " - rel RMSE = " + string(sprintf("%.2f", relRmse_pct)) + "%", ...
-            "Interpreter", "none");
-
-        legend("Location", "best", "Interpreter", "none");
-
-        if ~plotAllGroups
-            break;
-        end
-    end
 end
 
 %% General table / utility helpers

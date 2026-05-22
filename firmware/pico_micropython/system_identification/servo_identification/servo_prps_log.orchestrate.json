@@ -1,0 +1,39 @@
+{
+  "orchestration_version": 1,
+  "description": "Repeated servo PRPS campaign with 25 log-spaced frequency points up to 3 Hz.",
+  "remote_config_path": "run_config.json",
+  "write_manifest": false,
+
+  "repeat_sequence": {
+    "count": 5,
+    "base_prps_seed": 4001,
+    "seed_mode": "same_seed_per_pass",
+    "seed_increment_per_pass": 1,
+    "run_order_seed_offset": 50000
+  },
+
+  "sequence": [
+    {
+      "name": "servo_amp600_dense_log_0p10_to_3Hz",
+      "config": {
+        "LOG_FILE_BASE": "servo_prps_log_amp600_dense_log_0p10_to_3Hz",
+        "NUM_ACQUISITION_SETS": 1,
+        "COOLDOWN_BETWEEN_SETS_MS": 0,
+
+        "USE_MANUAL_FREQUENCY_LIST": false,
+        "AUTO_FREQ_MIN_HZ": 0.10,
+        "AUTO_FREQ_MAX_HZ": 3.00,
+        "AUTO_NUM_FREQS": 25,
+        "AUTO_FREQ_SPACING": "log",
+
+        "PRPS_PERIOD_S": 20.0,
+        "NUM_PERIODS_PER_RUN": 4,
+        "COMMAND_UPDATE_DT_MS": 10,
+
+        "TEST_RUNS": [
+          ["local_center_amp1000", 1450, 1000]
+        ]
+      }
+    }
+  ]
+}

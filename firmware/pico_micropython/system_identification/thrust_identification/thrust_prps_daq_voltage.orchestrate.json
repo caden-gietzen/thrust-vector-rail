@@ -1,0 +1,28 @@
+{
+  "orchestration_version": 1,
+  "description": "Repeated segmented thrust PRPS campaign using the same seed across regions within each pass.",
+  "remote_config_path": "run_config.json",
+  "write_manifest": false,
+
+
+  "repeat_sequence": {
+    "count": 5,
+    "base_prps_seed": 2001,
+    "seed_mode": "same_seed_per_pass",
+    "seed_increment_per_pass": 1,
+    "run_order_seed_offset": 50000
+  },
+
+  "sequence": [
+    {
+      "name": "local_1400_1950",
+      "config": {
+        "LOG_FILE_BASE": "thrust_prps_daq_voltage_local_1400_1950",
+        "COOLDOWN_BETWEEN_SETS_MS": 30000,
+        "TEST_RUNS": [
+          ["local_1400_1950", 1675, 275]
+        ]
+      }
+    }
+  ]
+}

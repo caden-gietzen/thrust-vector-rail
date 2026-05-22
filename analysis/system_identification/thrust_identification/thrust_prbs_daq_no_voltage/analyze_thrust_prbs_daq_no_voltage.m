@@ -28,7 +28,7 @@ runNames = [
 
 scriptPath = mfilename("fullpath");
 
-dataDir = getMirroredRawDataDir(scriptPath);
+dataDir = getMirroredRawDataDir(scriptPath, "candidate");
 plotDir = getMirroredPlotDir(scriptPath);
 
 addpath(genpath(fullfile(findRepoRoot(scriptPath), "analysis", "util")));

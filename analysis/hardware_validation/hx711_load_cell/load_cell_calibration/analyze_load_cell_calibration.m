@@ -22,7 +22,7 @@ dataFile = "2026_05_10_servo_sweep_800us_2125us_00.csv";
 
 scriptPath = mfilename("fullpath");
 
-dataDir = getMirroredRawDataDir(scriptPath);
+dataDir = getMirroredRawDataDir(scriptPath, "candidate");
 plotDir = getMirroredPlotDir(scriptPath);
 
 if USE_LATEST_CSV

@@ -1,50 +1,43 @@
-# thrust_prps_daq_voltage.py
-# Dynamic thrust data acquisition using PRPS:
-#   Pseudo Random Periodic Signal = periodic multisine with random phases.
+# servo_prps_log.py
 #
-# Hardware:
-#   - Raspberry Pi Pico / RP2040 running MicroPython
-#   - HX711 + load cell
-#   - One or more ESC signal pins driven with identical PWM command
-#   - Pixhawk TELEM2 MAVLink output wired to Pico UART RX for battery voltage/current
+# Purpose:
+#   Run PRPS-style servo command tests and log encoder-measured servo angle.
+#
+# PRPS = Pseudo-Random Periodic Signal
+#      = periodic multisine with random phases.
 #
 # Output CSV columns:
-#   t_ms,t_s,set_index,prps_seed,run_order_seed,run_name,segment,pwm_us,
-#   raw_count,tared_count,force_N,
-#   battery_voltage_V,battery_current_A,battery_remaining_pct,battery_age_ms,
-#   mavlink_total_packets,mavlink_sys_status_packets,mavlink_bad_frames,
+#   t_ms,t_s,set_index,prps_seed,run_order_seed,run_name,segment,
+#   servo_us,command_delta_us,command_norm,
+#   count,count_zero,count_delta,
+#   theta_rad,theta_deg,
 #   phase,period_index,period_sample_index
 #
-# Main idea:
-#   PRBS:
-#       random high/low steps.
-#
-#   PRPS:
-#       periodic input made from selected sinusoids:
-#
-#       u(t) = center_pwm + amplitude_pwm * normalized_sum_of_sines(t)
-#
-#   This version is memory-safe for the Pico:
-#       - It does NOT store the full waveform.
-#       - It computes each PRPS sample on the fly.
-#       - It only stores frequency bins and phase values.
+# Hardware:
+#   Servo PWM: GP15
+#   Encoder A: GP18
+#   Encoder B: GP19
 #
 # Structure note:
-#   This file is intentionally organized into functions so VS Code's Outline
-#   panel is useful for navigation. The main execution path is:
+#   This file is organized into functions so VS Code's Outline panel is useful.
+#   The main execution path is:
 #
 #       main()
-#           print_startup_banner()
-#           setup_hardware()
-#           tare_load_cell()
-#           arm_escs()
-#           run_all_acquisition_sets()
-#           safe_shutdown()
+#           cfg = finalize_config(make_config())
+#           print_startup_banner(cfg)
+#           setup_hardware(cfg)
+#           run_all_acquisition_sets(cfg, servo)
+#           safe_shutdown(cfg, servo)
+#
+# Orchestration note:
+#   If /run_config.json or run_config.json exists on the Pico, values in that
+#   JSON file override the defaults from make_config(). This lets the laptop
+#   runner execute one bounded segment, pull/delete the CSV, and upload the
+#   next segment's config.
 
-from machine import Pin, PWM, UART
-from utime import sleep, sleep_ms, ticks_ms, ticks_diff
-from hx711_gpio import HX711
-from lib.mavlink_battery import MavlinkBatteryReader
+import time
+from machine import Pin, PWM
+import encoder
 import urandom
 import math
 
@@ -58,117 +51,96 @@ def make_config():
     """
     Return all user-editable settings in one dictionary.
 
-    Keeping settings inside one function makes the VS Code Outline cleaner and
-    prevents a very long wall of global constants at the top of the file.
-
-    If /run_config.json exists on the Pico, values in that JSON file override
-    this default configuration. This lets the laptop orchestrator run one
-    bounded test segment at a time, pull the CSV, delete it from the Pico,
-    and then launch the next segment with a new config.
+    The laptop orchestrator can upload /run_config.json to override any of
+    these keys for one bounded Pico execution.
     """
     cfg = {
         # ----------------------------------------------------
         # File / acquisition settings
         # ----------------------------------------------------
-        "LOG_FILE_BASE": "thrust_prps_daq_voltage",
+        "LOG_FILE_BASE": "servo_prps_log",
         "NUM_ACQUISITION_SETS": 1,
-        "BASE_PRPS_SEED": 2001,
+        "BASE_PRPS_SEED": 4004,
         "RUN_ORDER_SEED_OFFSET": 50000,
-        "COOLDOWN_BETWEEN_SETS_MS": 30000,
-        "RETARE_EACH_SET": True,
+        "NEW_PHASES_EACH_SET": True,
+        "FIXED_RUN_ORDER": True,
+        "COOLDOWN_BETWEEN_SETS_MS": 0,
+        "SAVE_FREQUENCY_PLAN_TXT": True,
 
         # ----------------------------------------------------
-        # HX711 / load-cell settings
+        # Hardware settings
         # ----------------------------------------------------
-        "HX711_DAT_PIN": 20,
-        "HX711_SCK_PIN": 21,
-        "HX711_GAIN": 128,
-        "SCALE_G_PER_COUNT": 0.002409592,
-        "FORCE_SIGN": 1,
-        "TARE_SAMPLES": 100,
-        "SAMPLES_RUN": 1,
-        "TARE_SAMPLE_DELAY_MS": 20,
+        "ENC_A_PIN": 18,
+        "ENC_B_PIN": 19,
+        "SERVO_PIN": 15,
+        "MAX_STEP_RATE": 1000000,
+        "DRAIN_HZ": 10000,
+        "SERVO_FREQ_HZ": 50,
 
         # ----------------------------------------------------
-        # ESC / PWM settings
+        # Servo / encoder calibration
         # ----------------------------------------------------
-        "ESC_PINS": [13, 14],
-        "ESC_FREQ_HZ": 50,
-        "PWM_SAFE_US": 1000,
-        "PWM_HARD_MIN_US": 1100,
-        "PWM_HARD_MAX_US": 1950,
+        "COUNTS_PER_REV": 2400.0,
+        "SERVO_CENTER_US": 1450,
+        "SERVO_HARD_MIN_US": 400,
+        "SERVO_HARD_MAX_US": 2500,
 
         # ----------------------------------------------------
-        # Pixhawk MAVLink battery telemetry settings
+        # Safety / timing
         # ----------------------------------------------------
-        "MAVLINK_UART_ID": 0,
-        "MAVLINK_TX_PIN": 0,
-        "MAVLINK_RX_PIN": 1,
-        "MAVLINK_BAUDRATE": 57600,
-        "BATTERY_STALE_MS": 1000,
+        "INITIAL_COUNTDOWN_S": 5,
+        "PRE_RUN_SETTLE_MS": 1000,
+        "POST_ZERO_SETTLE_MS": 300,
+        "BASELINE_HOLD_MS": 2000,
+        "POST_RUN_HOLD_MS": 1000,
+        "PRINT_EVERY_N_SAMPLES": 200,
 
         # ----------------------------------------------------
-        # Safety/countdown timing
-        # ----------------------------------------------------
-        "INITIAL_SAFETY_COUNTDOWN_S": 10,
-        "ARM_COUNTDOWN_S": 5,
-        "ARM_TIME_MS": 5000,
-        "PRE_RUN_SETTLE_MS": 3000,
-        "POST_RUN_IDLE_MS": 1500,
-        "BASELINE_HOLD_MS": 3000,
-
-        # ----------------------------------------------------
-        # PRPS frequency-control toggles
+        # PRPS settings
         # ----------------------------------------------------
         "USE_MANUAL_FREQUENCY_LIST": False,
         "MANUAL_EXCITED_FREQS_HZ": [
-            0.05,
-            0.075,
             0.10,
             0.15,
             0.20,
             0.30,
             0.40,
-            0.60,
-            0.80,
+            0.50,
+            0.75,
             1.00,
             1.25,
             1.50,
             2.00,
+            2.50,
+            3.00,
         ],
-        "AUTO_FREQ_MIN_HZ": 0.05,
+        "AUTO_FREQ_MIN_HZ": 0.10,
         "AUTO_FREQ_MAX_HZ": 3.00,
-        "AUTO_NUM_FREQS": 25,
+        "AUTO_NUM_FREQS": 13,
         "AUTO_FREQ_SPACING": "log",
-        "PRPS_PERIOD_S": 40.0,
-        "NUM_PERIODS_PER_RUN": 3,
-        "COMMAND_UPDATE_DT_MS": 20,
-        "PRINT_FREQUENCY_PLAN": False,
-        "SAVE_FREQUENCY_PLAN": False,
+        "PRPS_PERIOD_S": 20.0,
+        "NUM_PERIODS_PER_RUN": 4,
+        "COMMAND_UPDATE_DT_MS": 10,
+        "PRINT_FREQUENCY_PLAN": True,
         "RANDOMIZE_PHASES": True,
-        "NEW_PHASES_EACH_SET": True,
-        "USE_PHASE_SEARCH": False,
-        "NUM_PHASE_SEARCH_TRIALS": 1,
-        "REMOVE_WAVEFORM_MEAN": False,
         "NORMALIZE_TO_PEAK": True,
         "ROUND_PWM_TO_INT": True,
 
         # ----------------------------------------------------
         # Test run definitions
         # ----------------------------------------------------
+        # Each entry:
+        #   (run_name, center_us, amplitude_us)
+        #
+        # JSON uploads should use arrays:
+        #   ["local_center_amp600", 1450, 600]
         "TEST_RUNS": [
-            #("global_1100_1950", 1525, 425),
-            ("local_1100_1350", 1225, 125),
-            #("local_1400_1650", 1525, 125),
-            #("local_1700_1850", 1775, 75),
+            ("local_center_amp600", 1450, 600),
         ],
-        "FIXED_RUN_ORDER": False,
-        "PRINT_EVERY_N_SAMPLES": 50,
     }
 
     cfg = apply_external_config_if_present(cfg)
     return cfg
-
 
 
 def load_json_file_if_exists(path):
@@ -195,14 +167,11 @@ def normalize_external_config(external):
     """
     Accept either of these uploaded formats:
 
-        {"LOG_FILE_BASE": "...", "BASE_PRPS_SEED": 2001}
+        {"LOG_FILE_BASE": "...", "BASE_PRPS_SEED": 4001}
 
     or:
 
         {"name": "segment001", "config": {"LOG_FILE_BASE": "..."}}
-
-    The laptop orchestrator should normally upload only the inner config, but
-    accepting both formats makes the Pico side more tolerant during manual tests.
     """
     if external is None:
         return None
@@ -227,7 +196,7 @@ def coerce_config_types(cfg):
         coerced_runs = []
         for run in cfg["TEST_RUNS"]:
             if len(run) != 3:
-                raise ValueError("Each TEST_RUNS entry must be [run_name, center_pwm, amplitude_pwm].")
+                raise ValueError("Each TEST_RUNS entry must be [run_name, center_us, amplitude_us].")
             coerced_runs.append((run[0], run[1], run[2]))
         cfg["TEST_RUNS"] = coerced_runs
 
@@ -238,9 +207,8 @@ def apply_external_config_if_present(cfg):
     """
     Overrides the default config with /run_config.json if present.
 
-    This is intentionally generic: the Pico script does not know about the
-    full orchestration plan. It only receives and applies the config for the
-    current segment.
+    The Pico script does not know about the full orchestration plan. It only
+    receives and applies the config for the current segment.
     """
     config_path = "/run_config.json"
     external = load_json_file_if_exists(config_path)
@@ -264,12 +232,12 @@ def apply_external_config_if_present(cfg):
     return coerce_config_types(cfg)
 
 
-
 def finalize_config(cfg):
     """
     Add derived values to the configuration dictionary.
     """
-    cfg["SCALE_N_PER_COUNT"] = cfg["SCALE_G_PER_COUNT"] * 9.80665 / 1000.0
+    cfg["RAD_PER_COUNT"] = 2.0 * math.pi / cfg["COUNTS_PER_REV"]
+    cfg["DEG_PER_COUNT"] = 360.0 / cfg["COUNTS_PER_REV"]
     return cfg
 
 
@@ -283,34 +251,31 @@ def countdown(message, seconds):
     print(message)
     for remaining in range(seconds, 0, -1):
         print(remaining)
-        sleep(1)
+        time.sleep(1)
     print("Starting now.")
 
 
 def cooldown_countdown(message, duration_ms):
-    """
-    Long cooldown countdown with sparse prints.
-    """
     if duration_ms <= 0:
         return
 
     print()
     print(message)
-    start_ms = ticks_ms()
+
+    start_ms = time.ticks_ms()
     last_print_s = -1
 
-    while ticks_diff(ticks_ms(), start_ms) < duration_ms:
-        elapsed_ms = ticks_diff(ticks_ms(), start_ms)
+    while time.ticks_diff(time.ticks_ms(), start_ms) < duration_ms:
+        elapsed_ms = time.ticks_diff(time.ticks_ms(), start_ms)
         remaining_ms = duration_ms - elapsed_ms
         remaining_s = int((remaining_ms + 999) / 1000)
 
-        # Print every 30 seconds, plus final 10 seconds.
         if remaining_s != last_print_s:
-            if remaining_s % 30 == 0 or remaining_s <= 10:
+            if remaining_s % 10 == 0 or remaining_s <= 5:
                 print("Cooldown remaining:", remaining_s, "s")
                 last_print_s = remaining_s
 
-        sleep_ms(200)
+        time.sleep_ms(200)
 
     print("Cooldown complete.")
 
@@ -323,238 +288,105 @@ def clamp(value, lo, hi):
     return value
 
 
-def csv_value(value):
-    """
-    Converts None to blank for cleaner CSV logging.
-    """
-    if value is None:
-        return ""
-    return value
-
-
 def seed_urandom(seed_value, label):
     try:
         urandom.seed(seed_value)
         print(label, "seed:", seed_value)
     except Exception:
-        print("NOTE: urandom.seed unavailable for", label, "; sequence may not be exactly repeatable.")
+        print("NOTE: urandom.seed unavailable for", label)
 
 
 def random_unit_float():
-    # Returns approximately [0, 1).
     return urandom.getrandbits(24) / float(1 << 24)
 
 
-def make_log_filename(cfg, set_index, prps_seed):
-    # set_index is intentionally not included in the filename here because the
-    # seed already differentiates acquisition sets under the current seed plan.
-    return "{}_seed{}.csv".format(
-        cfg["LOG_FILE_BASE"],
-        int(prps_seed),
+def format_freq_for_label(freq_hz):
+    if abs(freq_hz - int(freq_hz)) < 1e-9:
+        return str(int(freq_hz))
+
+    text = "{:.6g}".format(freq_hz)
+    return text.replace(".", "p")
+
+
+def make_frequency_range_label(freqs_hz):
+    if not freqs_hz:
+        return "no_freqs"
+
+    return "{}_to_{}Hz".format(
+        format_freq_for_label(min(freqs_hz)),
+        format_freq_for_label(max(freqs_hz)),
     )
 
 
 # ============================================================
-# PWM / ESC helpers
+# Servo / PWM helpers
 # ============================================================
 
 
-def pwm_us_to_duty_u16(pwm_us):
-    # 50 Hz period = 20,000 us
-    return int(int(pwm_us) * 65535 / 20000)
+def write_pwm_us(cfg, pwm, pulse_us):
+    pulse_us = int(clamp(
+        pulse_us,
+        cfg["SERVO_HARD_MIN_US"],
+        cfg["SERVO_HARD_MAX_US"],
+    ))
+    pwm.duty_ns(int(pulse_us * 1000))
 
 
-def set_pwm_us(cfg, escs, pwm_us):
-    pwm_us = clamp(int(pwm_us), cfg["PWM_SAFE_US"], 2000)
-    duty = pwm_us_to_duty_u16(pwm_us)
-    for esc in escs:
-        esc.duty_u16(duty)
+def setup_servo(cfg):
+    print("Initializing servo PWM.")
+    print("Servo pin:", cfg["SERVO_PIN"])
 
+    servo = PWM(Pin(cfg["SERVO_PIN"]))
+    servo.freq(cfg["SERVO_FREQ_HZ"])
 
-def setup_escs(cfg):
-    print("Initializing ESC PWM outputs...")
-    print("ESC pins:", cfg["ESC_PINS"])
+    write_pwm_us(cfg, servo, cfg["SERVO_CENTER_US"])
+    time.sleep_ms(1000)
 
-    escs = []
-    for pin_num in cfg["ESC_PINS"]:
-        esc = PWM(Pin(pin_num, Pin.OUT))
-        esc.freq(cfg["ESC_FREQ_HZ"])
-        escs.append(esc)
-
-    set_pwm_us(cfg, escs, cfg["PWM_SAFE_US"])
-    print("ESC outputs set to safe PWM:", cfg["PWM_SAFE_US"], "us")
-    return escs
-
-
-def arm_escs(cfg, escs):
-    countdown(
-        "Arming ESCs at safe PWM. Keep clear of motors/propellers.",
-        cfg["ARM_COUNTDOWN_S"],
-    )
-
-    set_pwm_us(cfg, escs, cfg["PWM_SAFE_US"])
-    sleep_ms(cfg["ARM_TIME_MS"])
-    print("ESC arming complete.")
+    return servo
 
 
 # ============================================================
-# HX711 / force helpers
+# Encoder / angle helpers
 # ============================================================
 
 
-def setup_hx711(cfg):
-    print("Initializing HX711...")
-    print("DAT pin:", cfg["HX711_DAT_PIN"])
-    print("SCK pin:", cfg["HX711_SCK_PIN"])
+def setup_encoder(cfg):
+    print("Initializing encoder.")
+    print("Encoder pins:", cfg["ENC_A_PIN"], cfg["ENC_B_PIN"])
+    print("Max step rate:", cfg["MAX_STEP_RATE"])
+    print("Drain Hz:", cfg["DRAIN_HZ"])
 
-    data_pin = Pin(cfg["HX711_DAT_PIN"], Pin.IN)
-    clock_pin = Pin(cfg["HX711_SCK_PIN"], Pin.OUT)
-
-    # HX711 powers down if SCK is held high. Force low before initializing.
-    clock_pin.value(0)
-    sleep_ms(750)
-
-    hx = HX711(clock_pin, data_pin, gain=cfg["HX711_GAIN"])
-    print("HX711 initialized.")
-    return hx
-
-
-def read_average(hx, n=1, delay_ms=0):
-    total = 0
-    good = 0
-
-    for _ in range(n):
-        try:
-            total += hx.read()
-            good += 1
-        except OSError as e:
-            print("HX711 read error:", e)
-
-        if delay_ms > 0:
-            sleep_ms(delay_ms)
-
-    if good == 0:
-        raise OSError("No valid HX711 samples")
-
-    return total / good
-
-
-def force_N_from_raw(cfg, raw_count, offset_count):
-    tared_count = raw_count - offset_count
-    force_N = cfg["FORCE_SIGN"] * tared_count * cfg["SCALE_N_PER_COUNT"]
-    return tared_count, force_N
-
-
-def tare_load_cell(cfg, hx, message):
-    countdown(
-        message,
-        cfg["INITIAL_SAFETY_COUNTDOWN_S"],
+    encoder.init_configured(
+        cfg["ENC_A_PIN"],
+        cfg["ENC_B_PIN"],
+        cfg["MAX_STEP_RATE"],
+        cfg["DRAIN_HZ"],
     )
 
-    print("Taring with", cfg["TARE_SAMPLES"], "samples...")
-    offset_count = read_average(
-        hx,
-        cfg["TARE_SAMPLES"],
-        delay_ms=cfg["TARE_SAMPLE_DELAY_MS"],
-    )
-    print("Offset count:", offset_count)
-    return offset_count
+    time.sleep_ms(100)
 
 
-def retare_load_cell_quick(cfg, hx):
-    print("Re-taring load cell for this acquisition set...")
-    offset_count = read_average(
-        hx,
-        cfg["TARE_SAMPLES"],
-        delay_ms=cfg["TARE_SAMPLE_DELAY_MS"],
-    )
-    print("Set offset count:", offset_count)
-    return offset_count
+def center_and_zero_encoder(cfg, servo, center_us):
+    print("Centering servo.")
+    write_pwm_us(cfg, servo, center_us)
+    time.sleep_ms(cfg["PRE_RUN_SETTLE_MS"])
+
+    print("Zeroing encoder.")
+    encoder.zero()
+    time.sleep_ms(cfg["POST_ZERO_SETTLE_MS"])
+
+    count_zero = encoder.get_count()
+    print("Local zero count:", count_zero)
+
+    return count_zero
 
 
-# ============================================================
-# MAVLink battery telemetry helpers
-# ============================================================
+def count_to_theta_rad(cfg, count_delta):
+    return count_delta * cfg["RAD_PER_COUNT"]
 
 
-def setup_mavlink_battery(cfg):
-    print("Initializing MAVLink battery UART...")
-    print("UART:", cfg["MAVLINK_UART_ID"])
-    print("TX pin:", cfg["MAVLINK_TX_PIN"])
-    print("RX pin:", cfg["MAVLINK_RX_PIN"])
-    print("Baudrate:", cfg["MAVLINK_BAUDRATE"])
-
-    uart = UART(
-        cfg["MAVLINK_UART_ID"],
-        baudrate=cfg["MAVLINK_BAUDRATE"],
-        tx=Pin(cfg["MAVLINK_TX_PIN"]),
-        rx=Pin(cfg["MAVLINK_RX_PIN"]),
-    )
-
-    mav_batt = MavlinkBatteryReader(uart)
-
-    warmup_start_ms = ticks_ms()
-    while ticks_diff(ticks_ms(), warmup_start_ms) < 1000:
-        mav_batt.update()
-        sleep_ms(10)
-
-    if mav_batt.has_battery():
-        print(
-            "MAVLink battery reader initialized.",
-            "V:", mav_batt.voltage_V,
-            "A:", mav_batt.current_A,
-            "remaining:", mav_batt.battery_remaining_pct,
-            "age_ms:", mav_batt.age_ms(),
-        )
-    else:
-        print("WARNING: MAVLink battery reader initialized, but no SYS_STATUS battery data yet.")
-
-    return mav_batt
-
-
-def print_battery_snapshot(mav_batt, label):
-    if mav_batt is None:
-        print(label, "battery: no MAVLink reader")
-        return
-
-    mav_batt.update()
-
-    if mav_batt.has_battery():
-        print(
-            label,
-            "battery:",
-            "V:", mav_batt.voltage_V,
-            "A:", mav_batt.current_A,
-            "remaining:", mav_batt.battery_remaining_pct,
-            "age_ms:", mav_batt.age_ms(),
-        )
-    else:
-        print(label, "battery: no SYS_STATUS decoded yet")
-
-
-def get_battery_snapshot(mav_batt):
-    if mav_batt is None:
-        return "", "", "", "", "", "", ""
-
-    (
-        battery_voltage_V,
-        battery_current_A,
-        battery_remaining_pct,
-        battery_age_ms,
-        mavlink_total_packets,
-        mavlink_sys_status_packets,
-        mavlink_bad_frames,
-    ) = mav_batt.snapshot()
-
-    return (
-        csv_value(battery_voltage_V),
-        csv_value(battery_current_A),
-        csv_value(battery_remaining_pct),
-        csv_value(battery_age_ms),
-        mavlink_total_packets,
-        mavlink_sys_status_packets,
-        mavlink_bad_frames,
-    )
+def count_to_theta_deg(cfg, count_delta):
+    return count_delta * cfg["DEG_PER_COUNT"]
 
 
 # ============================================================
@@ -571,8 +403,7 @@ def make_auto_frequency_list(cfg):
     if cfg["AUTO_FREQ_SPACING"] == "linear":
         for i in range(cfg["AUTO_NUM_FREQS"]):
             alpha = i / float(cfg["AUTO_NUM_FREQS"] - 1)
-            f = cfg["AUTO_FREQ_MIN_HZ"] + alpha * (cfg["AUTO_FREQ_MAX_HZ"] - cfg["AUTO_FREQ_MIN_HZ"])
-            freqs.append(f)
+            freqs.append(cfg["AUTO_FREQ_MIN_HZ"] + alpha * (cfg["AUTO_FREQ_MAX_HZ"] - cfg["AUTO_FREQ_MIN_HZ"]))
         return freqs
 
     if cfg["AUTO_FREQ_SPACING"] == "log":
@@ -581,8 +412,7 @@ def make_auto_frequency_list(cfg):
 
         for i in range(cfg["AUTO_NUM_FREQS"]):
             alpha = i / float(cfg["AUTO_NUM_FREQS"] - 1)
-            f = math.exp(log_min + alpha * (log_max - log_min))
-            freqs.append(f)
+            freqs.append(math.exp(log_min + alpha * (log_max - log_min)))
         return freqs
 
     raise ValueError("AUTO_FREQ_SPACING must be 'linear' or 'log'")
@@ -595,15 +425,6 @@ def get_requested_frequencies_hz(cfg):
 
 
 def snap_frequencies_to_period_bins(requested_freqs_hz, period_s):
-    """
-    Snap requested frequencies to exact Fourier bins of the PRPS period.
-
-    Fundamental frequency:
-        f0 = 1 / period_s
-
-    Allowed frequencies:
-        f_k = k * f0
-    """
     fundamental_hz = 1.0 / period_s
 
     bins = []
@@ -619,12 +440,10 @@ def snap_frequencies_to_period_bins(requested_freqs_hz, period_s):
         if k < 1:
             k = 1
 
-        # Avoid duplicate bins after snapping.
         if k in used_bins:
             continue
 
         used_bins[k] = True
-
         bins.append(k)
         snapped_freqs.append(k * fundamental_hz)
         requested_kept.append(f_req)
@@ -643,6 +462,8 @@ def print_frequency_plan(cfg, requested_kept, snapped_freqs, bins, samples_per_p
     print("  Command update dt_ms:", cfg["COMMAND_UPDATE_DT_MS"])
     print("  Command update rate_Hz:", 1000.0 / cfg["COMMAND_UPDATE_DT_MS"])
     print("  Samples per period:", samples_per_period)
+    print("  Number of periods:", cfg["NUM_PERIODS_PER_RUN"])
+    print("  Total duration_s:", cfg["PRPS_PERIOD_S"] * cfg["NUM_PERIODS_PER_RUN"])
     print("  Excited frequencies:")
 
     for i in range(len(bins)):
@@ -669,22 +490,6 @@ def generate_random_phases(cfg, num_freqs):
 
 
 def prps_raw_value(sample_index, samples_per_period, bins, phases):
-    """
-    Compute one unnormalized PRPS sample.
-
-    The frequency bin k means:
-        f_k = k / PRPS_PERIOD_S
-
-    For sample n in one period:
-        sin(2*pi*k*n/N + phase)
-
-    where:
-        N = samples_per_period
-
-    This function is intentionally streaming:
-        - It does not allocate a waveform array.
-        - It computes one sample at a time.
-    """
     value = 0.0
 
     for i in range(len(bins)):
@@ -697,9 +502,6 @@ def prps_raw_value(sample_index, samples_per_period, bins, phases):
 
 
 def estimate_peak_and_rms(samples_per_period, bins, phases):
-    """
-    Estimate normalization constants without storing the waveform.
-    """
     peak = 0.0
     sum_sq = 0.0
 
@@ -725,23 +527,16 @@ def estimate_peak_and_rms(samples_per_period, bins, phases):
     return peak, rms, crest
 
 
-def print_selected_prps_signal(cfg, bins, samples_per_period, peak, rms, crest):
+def print_selected_prps_signal(bins, peak, rms, crest):
     print()
-    print("Selected PRPS streaming signal:")
+    print("Selected PRPS signal:")
     print("  Number of excited frequencies:", len(bins))
-    print("  Samples per period:", samples_per_period)
-    print("  Periods per run:", cfg["NUM_PERIODS_PER_RUN"])
-    print("  Total run duration_s:", cfg["PRPS_PERIOD_S"] * cfg["NUM_PERIODS_PER_RUN"])
     print("  Peak normalization:", peak)
     print("  RMS before normalization:", rms)
     print("  Crest factor:", crest)
 
 
 def generate_prps_plan(cfg, seed_value):
-    """
-    Generates only the PRPS metadata needed to compute samples on the fly.
-    Does NOT allocate a full waveform array.
-    """
     requested_freqs = get_requested_frequencies_hz(cfg)
 
     requested_kept, snapped_freqs, bins = snap_frequencies_to_period_bins(
@@ -758,13 +553,7 @@ def generate_prps_plan(cfg, seed_value):
     if samples_per_period < 4:
         raise ValueError("Too few samples per PRPS period.")
 
-    print_frequency_plan(
-        cfg,
-        requested_kept,
-        snapped_freqs,
-        bins,
-        samples_per_period,
-    )
+    print_frequency_plan(cfg, requested_kept, snapped_freqs, bins, samples_per_period)
 
     seed_urandom(seed_value, "PRPS phase")
     phases = generate_random_phases(cfg, len(bins))
@@ -775,14 +564,7 @@ def generate_prps_plan(cfg, seed_value):
         phases,
     )
 
-    print_selected_prps_signal(
-        cfg,
-        bins,
-        samples_per_period,
-        peak,
-        rms,
-        crest,
-    )
+    print_selected_prps_signal(bins, peak, rms, crest)
 
     return requested_kept, snapped_freqs, bins, phases, peak, samples_per_period, crest
 
@@ -796,17 +578,17 @@ def get_normalized_prps_sample(cfg, sample_index, samples_per_period, bins, phas
     return x
 
 
-def prps_sample_to_pwm(
+def prps_sample_to_command(
     cfg,
-    center_pwm,
-    amplitude_pwm,
+    center_us,
+    amplitude_us,
     sample_index,
     samples_per_period,
     bins,
     phases,
     peak,
 ):
-    x = get_normalized_prps_sample(
+    command_norm = get_normalized_prps_sample(
         cfg,
         sample_index,
         samples_per_period,
@@ -815,13 +597,15 @@ def prps_sample_to_pwm(
         peak,
     )
 
-    pwm = center_pwm + amplitude_pwm * x
-    pwm = clamp(pwm, cfg["PWM_HARD_MIN_US"], cfg["PWM_HARD_MAX_US"])
+    servo_us = center_us + amplitude_us * command_norm
+    servo_us = clamp(servo_us, cfg["SERVO_HARD_MIN_US"], cfg["SERVO_HARD_MAX_US"])
 
     if cfg["ROUND_PWM_TO_INT"]:
-        return int(round(pwm))
+        servo_us = int(round(servo_us))
 
-    return pwm
+    command_delta_us = servo_us - center_us
+
+    return servo_us, command_delta_us, command_norm
 
 
 # ============================================================
@@ -833,14 +617,30 @@ def write_prps_metadata_file(cfg, log_file, requested_freqs, snapped_freqs, bins
     metadata_file = log_file.replace(".csv", "_frequency_plan.txt")
 
     with open(metadata_file, "w") as f:
-        f.write("PRPS frequency plan\n")
+        f.write("Servo PRPS frequency plan\n")
         f.write("log_file={}\n".format(log_file))
         f.write("PRPS_PERIOD_S={}\n".format(cfg["PRPS_PERIOD_S"]))
         f.write("fundamental_Hz={}\n".format(1.0 / cfg["PRPS_PERIOD_S"]))
         f.write("COMMAND_UPDATE_DT_MS={}\n".format(cfg["COMMAND_UPDATE_DT_MS"]))
         f.write("command_update_rate_Hz={}\n".format(1000.0 / cfg["COMMAND_UPDATE_DT_MS"]))
         f.write("NUM_PERIODS_PER_RUN={}\n".format(cfg["NUM_PERIODS_PER_RUN"]))
+        f.write("COUNTS_PER_REV={}\n".format(cfg["COUNTS_PER_REV"]))
+        f.write("RAD_PER_COUNT={}\n".format(cfg["RAD_PER_COUNT"]))
+        f.write("DEG_PER_COUNT={}\n".format(cfg["DEG_PER_COUNT"]))
+        f.write("SERVO_CENTER_US={}\n".format(cfg["SERVO_CENTER_US"]))
         f.write("crest_factor={}\n".format(crest_factor))
+        f.write("\n")
+        f.write("run_idx,run_name,center_us,amplitude_us\n")
+
+        for i in range(len(cfg["TEST_RUNS"])):
+            run_name, center_us, amplitude_us = cfg["TEST_RUNS"][i]
+            f.write("{},{},{},{}\n".format(
+                i,
+                run_name,
+                center_us,
+                amplitude_us,
+            ))
+
         f.write("\n")
         f.write("requested_Hz,snapped_Hz,bin\n")
 
@@ -861,17 +661,17 @@ def write_prps_metadata_file(cfg, log_file, requested_freqs, snapped_freqs, bins
 
 def write_csv_header(f):
     f.write(
-        "t_ms,t_s,set_index,prps_seed,run_order_seed,run_name,segment,pwm_us,"
-        "raw_count,tared_count,force_N,"
-        "battery_voltage_V,battery_current_A,battery_remaining_pct,battery_age_ms,"
-        "mavlink_total_packets,mavlink_sys_status_packets,mavlink_bad_frames,"
+        "t_ms,t_s,set_index,prps_seed,run_order_seed,run_name,segment,"
+        "servo_us,command_delta_us,command_norm,"
+        "count,count_zero,count_delta,"
+        "theta_rad,theta_deg,"
         "phase,period_index,period_sample_index\n"
     )
 
 
-def print_sample_status(cfg, sample_counter, set_index, prps_seed, phase, pwm_us, thrust_N,
-                        battery_voltage_V, battery_current_A, battery_age_ms,
-                        period_index, period_sample_index):
+def print_sample_status(cfg, sample_counter, set_index, prps_seed, run_name,
+                        phase, servo_us, command_delta_us, count_delta,
+                        theta_deg, period_index, period_sample_index):
     if sample_counter % cfg["PRINT_EVERY_N_SAMPLES"] != 0:
         return
 
@@ -879,83 +679,62 @@ def print_sample_status(cfg, sample_counter, set_index, prps_seed, phase, pwm_us
         "sample", sample_counter,
         "set", set_index,
         "seed", prps_seed,
+        "run", run_name,
         "phase", phase,
-        "pwm_us", int(pwm_us),
-        "force_N", thrust_N,
-        "V", battery_voltage_V,
-        "A", battery_current_A,
-        "batt_age_ms", battery_age_ms,
+        "servo_us", int(servo_us),
+        "cmd_delta_us", int(command_delta_us),
+        "count_delta", int(count_delta),
+        "theta_deg", "{:.3f}".format(theta_deg),
         "period", period_index,
         "period_sample", period_sample_index,
     )
-
-    if battery_age_ms != "" and battery_age_ms is not None:
-        if battery_age_ms > cfg["BATTERY_STALE_MS"]:
-            print("WARNING: battery telemetry stale. age_ms:", battery_age_ms)
 
 
 def write_sample(
     cfg,
     state,
     f,
-    hx,
-    mav_batt,
     t0_ms,
     set_index,
     prps_seed,
     run_order_seed,
     run_name,
     segment,
-    pwm_us,
-    offset_count,
+    servo_us,
+    command_delta_us,
+    command_norm,
+    count_zero,
     phase,
     period_index,
     period_sample_index,
 ):
-    # Update MAVLink before the HX711 read.
-    if mav_batt is not None:
-        mav_batt.update()
-
-    raw_count = read_average(hx, cfg["SAMPLES_RUN"])
-    tared_count, thrust_N = force_N_from_raw(cfg, raw_count, offset_count)
-
-    # Update MAVLink again after HX711 read.
-    if mav_batt is not None:
-        mav_batt.update()
-
-    (
-        battery_voltage_V,
-        battery_current_A,
-        battery_remaining_pct,
-        battery_age_ms,
-        mavlink_total_packets,
-        mavlink_sys_status_packets,
-        mavlink_bad_frames,
-    ) = get_battery_snapshot(mav_batt)
-
-    t_ms = ticks_diff(ticks_ms(), t0_ms)
+    now_ms = time.ticks_ms()
+    t_ms = time.ticks_diff(now_ms, t0_ms)
     t_s = t_ms / 1000.0
 
+    count = encoder.get_count()
+    count_delta = count - count_zero
+
+    theta_rad = count_to_theta_rad(cfg, count_delta)
+    theta_deg = count_to_theta_deg(cfg, count_delta)
+
     f.write(
-        "{},{:.3f},{},{},{},{},{},{},{:.3f},{:.3f},{:.6f},{},{},{},{},{},{},{},{},{},{}\n".format(
-            t_ms,
+        "{},{:.3f},{},{},{},{},{},{},{},{:.6f},{},{},{},{:.8f},{:.5f},{},{},{}\n".format(
+            int(t_ms),
             t_s,
             int(set_index),
             int(prps_seed),
             int(run_order_seed),
             run_name,
             segment,
-            int(pwm_us),
-            raw_count,
-            tared_count,
-            thrust_N,
-            battery_voltage_V,
-            battery_current_A,
-            battery_remaining_pct,
-            battery_age_ms,
-            mavlink_total_packets,
-            mavlink_sys_status_packets,
-            mavlink_bad_frames,
+            int(servo_us),
+            int(command_delta_us),
+            command_norm,
+            int(count),
+            int(count_zero),
+            int(count_delta),
+            theta_rad,
+            theta_deg,
             phase,
             int(period_index),
             int(period_sample_index),
@@ -969,17 +748,15 @@ def write_sample(
         state["sample_counter"],
         set_index,
         prps_seed,
+        run_name,
         phase,
-        pwm_us,
-        thrust_N,
-        battery_voltage_V,
-        battery_current_A,
-        battery_age_ms,
+        servo_us,
+        command_delta_us,
+        count_delta,
+        theta_deg,
         period_index,
         period_sample_index,
     )
-
-    return raw_count, thrust_N
 
 
 # ============================================================
@@ -991,117 +768,121 @@ def hold_and_log(
     cfg,
     state,
     f,
-    hx,
-    mav_batt,
-    escs,
+    servo,
     t0_ms,
     set_index,
     prps_seed,
     run_order_seed,
     run_name,
     segment,
-    pwm_us,
+    center_us,
+    servo_us,
     duration_ms,
-    offset_count,
+    count_zero,
     phase,
 ):
-    set_pwm_us(cfg, escs, pwm_us)
-    start_ms = ticks_ms()
+    servo_us = int(clamp(servo_us, cfg["SERVO_HARD_MIN_US"], cfg["SERVO_HARD_MAX_US"]))
+    command_delta_us = servo_us - center_us
+    command_norm = 0.0
 
-    while ticks_diff(ticks_ms(), start_ms) < duration_ms:
-        loop_start_ms = ticks_ms()
+    write_pwm_us(cfg, servo, servo_us)
+
+    start_ms = time.ticks_ms()
+
+    while time.ticks_diff(time.ticks_ms(), start_ms) < duration_ms:
+        loop_start_ms = time.ticks_ms()
 
         write_sample(
             cfg=cfg,
             state=state,
             f=f,
-            hx=hx,
-            mav_batt=mav_batt,
             t0_ms=t0_ms,
             set_index=set_index,
             prps_seed=prps_seed,
             run_order_seed=run_order_seed,
             run_name=run_name,
             segment=segment,
-            pwm_us=pwm_us,
-            offset_count=offset_count,
+            servo_us=servo_us,
+            command_delta_us=command_delta_us,
+            command_norm=command_norm,
+            count_zero=count_zero,
             phase=phase,
             period_index=-1,
             period_sample_index=-1,
         )
 
-        elapsed_ms = ticks_diff(ticks_ms(), loop_start_ms)
+        elapsed_ms = time.ticks_diff(time.ticks_ms(), loop_start_ms)
         remaining_ms = cfg["COMMAND_UPDATE_DT_MS"] - elapsed_ms
 
         if remaining_ms > 0:
-            sleep_ms(remaining_ms)
+            time.sleep_ms(remaining_ms)
 
 
-def log_pre_run_baseline(cfg, state, f, hx, mav_batt, escs, t0_ms, set_index,
-                         prps_seed, run_order_seed, run_name, center_pwm, offset_count):
-    print("Pre-run baseline...")
+def log_pre_run_baseline(cfg, state, f, servo, t0_ms, set_index,
+                         prps_seed, run_order_seed, run_name,
+                         center_us, count_zero):
+    print("Pre-run baseline.")
     hold_and_log(
         cfg=cfg,
         state=state,
         f=f,
-        hx=hx,
-        mav_batt=mav_batt,
-        escs=escs,
+        servo=servo,
         t0_ms=t0_ms,
         set_index=set_index,
         prps_seed=prps_seed,
         run_order_seed=run_order_seed,
         run_name=run_name,
         segment="baseline_pre",
-        pwm_us=center_pwm,
+        center_us=center_us,
+        servo_us=center_us,
         duration_ms=cfg["BASELINE_HOLD_MS"],
-        offset_count=offset_count,
+        count_zero=count_zero,
         phase="baseline_pre",
     )
 
 
-def log_center_settle(cfg, state, f, hx, mav_batt, escs, t0_ms, set_index,
-                      prps_seed, run_order_seed, run_name, center_pwm, offset_count):
-    print("Settling at center...")
+def log_center_settle(cfg, state, f, servo, t0_ms, set_index,
+                      prps_seed, run_order_seed, run_name,
+                      center_us, count_zero):
+    print("Settling at run center.")
     hold_and_log(
         cfg=cfg,
         state=state,
         f=f,
-        hx=hx,
-        mav_batt=mav_batt,
-        escs=escs,
+        servo=servo,
         t0_ms=t0_ms,
         set_index=set_index,
         prps_seed=prps_seed,
         run_order_seed=run_order_seed,
         run_name=run_name,
         segment="settle",
-        pwm_us=center_pwm,
+        center_us=center_us,
+        servo_us=center_us,
         duration_ms=cfg["PRE_RUN_SETTLE_MS"],
-        offset_count=offset_count,
+        count_zero=count_zero,
         phase="settle",
     )
 
 
-def log_post_run_baseline(cfg, state, f, hx, mav_batt, escs, t0_ms, set_index,
-                          prps_seed, run_order_seed, run_name, center_pwm, offset_count):
-    print("Post-run baseline...")
+def log_post_run_baseline(cfg, state, f, servo, t0_ms, set_index,
+                          prps_seed, run_order_seed, run_name,
+                          center_us, count_zero):
+    print("Post-run baseline.")
     hold_and_log(
         cfg=cfg,
         state=state,
         f=f,
-        hx=hx,
-        mav_batt=mav_batt,
-        escs=escs,
+        servo=servo,
         t0_ms=t0_ms,
         set_index=set_index,
         prps_seed=prps_seed,
         run_order_seed=run_order_seed,
         run_name=run_name,
         segment="baseline_post",
-        pwm_us=center_pwm,
+        center_us=center_us,
+        servo_us=center_us,
         duration_ms=cfg["BASELINE_HOLD_MS"],
-        offset_count=offset_count,
+        count_zero=count_zero,
         phase="baseline_post",
     )
 
@@ -1111,40 +892,48 @@ def log_post_run_baseline(cfg, state, f, hx, mav_batt, escs, t0_ms, set_index,
 # ============================================================
 
 
-def print_run_banner(cfg, set_index, prps_seed, run_order_seed, run_name,
-                     center_pwm, amplitude_pwm, samples_per_period, crest_factor):
-    low = clamp(center_pwm - amplitude_pwm, cfg["PWM_HARD_MIN_US"], cfg["PWM_HARD_MAX_US"])
-    high = clamp(center_pwm + amplitude_pwm, cfg["PWM_HARD_MIN_US"], cfg["PWM_HARD_MAX_US"])
+def print_run_banner(cfg, set_index, prps_seed, run_order_seed, run_idx,
+                     run_name, center_us, amplitude_us, samples_per_period,
+                     crest_factor):
+    low = center_us - amplitude_us
+    high = center_us + amplitude_us
 
     print()
+    print("============================================================")
     print("RUN:", run_name)
+    print("Run idx:", run_idx)
     print("Set index:", set_index)
     print("PRPS seed:", prps_seed)
     print("Run-order seed:", run_order_seed)
-    print("Center PWM:", center_pwm)
-    print("Amplitude:", amplitude_pwm)
-    print("Command bounds:", low, "to", high, "us")
-    print("PRPS period:", cfg["PRPS_PERIOD_S"], "s")
-    print("Number of periods:", cfg["NUM_PERIODS_PER_RUN"])
-    print("Total duration:", cfg["PRPS_PERIOD_S"] * cfg["NUM_PERIODS_PER_RUN"], "s")
-    print("Command update dt:", cfg["COMMAND_UPDATE_DT_MS"], "ms")
+    print("============================================================")
+    print("Center us:", center_us)
+    print("Amplitude us:", amplitude_us)
+    print("Command bounds:", low, "to", high)
+    print("PRPS period s:", cfg["PRPS_PERIOD_S"])
+    print("Periods per run:", cfg["NUM_PERIODS_PER_RUN"])
+    print("Total duration s:", cfg["PRPS_PERIOD_S"] * cfg["NUM_PERIODS_PER_RUN"])
+    print("Command dt ms:", cfg["COMMAND_UPDATE_DT_MS"])
     print("Samples per period:", samples_per_period)
     print("Crest factor:", crest_factor)
 
+    if low < cfg["SERVO_HARD_MIN_US"] or high > cfg["SERVO_HARD_MAX_US"]:
+        raise ValueError("Requested PRPS command exceeds hard servo safety bounds.")
 
-def run_prps_periods(cfg, state, f, hx, mav_batt, escs, t0_ms, set_index,
-                     prps_seed, run_order_seed, run_name, center_pwm,
-                     amplitude_pwm, offset_count, bins, phases, peak,
+
+def run_prps_periods(cfg, state, f, servo, t0_ms, set_index,
+                     prps_seed, run_order_seed, run_name, center_us,
+                     amplitude_us, count_zero, bins, phases, peak,
                      samples_per_period):
-    print("PRPS running...")
+    print("Running PRPS.")
 
     for period_index in range(cfg["NUM_PERIODS_PER_RUN"]):
         for period_sample_index in range(samples_per_period):
+            loop_start_ms = time.ticks_ms()
 
-            pwm_cmd = prps_sample_to_pwm(
+            servo_us, command_delta_us, command_norm = prps_sample_to_command(
                 cfg=cfg,
-                center_pwm=center_pwm,
-                amplitude_pwm=amplitude_pwm,
+                center_us=center_us,
+                amplitude_us=amplitude_us,
                 sample_index=period_sample_index,
                 samples_per_period=samples_per_period,
                 bins=bins,
@@ -1152,114 +941,106 @@ def run_prps_periods(cfg, state, f, hx, mav_batt, escs, t0_ms, set_index,
                 peak=peak,
             )
 
-            set_pwm_us(cfg, escs, pwm_cmd)
-
-            update_start_ms = ticks_ms()
+            write_pwm_us(cfg, servo, servo_us)
 
             write_sample(
                 cfg=cfg,
                 state=state,
                 f=f,
-                hx=hx,
-                mav_batt=mav_batt,
                 t0_ms=t0_ms,
                 set_index=set_index,
                 prps_seed=prps_seed,
                 run_order_seed=run_order_seed,
                 run_name=run_name,
-                segment=period_sample_index,
-                pwm_us=pwm_cmd,
-                offset_count=offset_count,
+                segment="prps",
+                servo_us=servo_us,
+                command_delta_us=command_delta_us,
+                command_norm=command_norm,
+                count_zero=count_zero,
                 phase="prps",
                 period_index=period_index,
                 period_sample_index=period_sample_index,
             )
 
-            elapsed_ms = ticks_diff(ticks_ms(), update_start_ms)
+            elapsed_ms = time.ticks_diff(time.ticks_ms(), loop_start_ms)
             remaining_ms = cfg["COMMAND_UPDATE_DT_MS"] - elapsed_ms
 
             if remaining_ms > 0:
-                sleep_ms(remaining_ms)
+                time.sleep_ms(remaining_ms)
 
 
 def run_prps_sequence(
     cfg,
     state,
     f,
-    hx,
-    mav_batt,
-    escs,
+    servo,
     t0_ms,
     set_index,
     prps_seed,
     run_order_seed,
+    run_idx,
     run_name,
-    center_pwm,
-    amplitude_pwm,
-    offset_count,
+    center_us,
+    amplitude_us,
+    count_zero,
     prps_plan,
 ):
-    requested_freqs, snapped_freqs, bins, phases, peak, samples_per_period, crest_factor = prps_plan
+    requested_freqs, snapped_freqs, bins, phases, peak, samples_per_period, crest = prps_plan
 
     print_run_banner(
         cfg,
         set_index,
         prps_seed,
         run_order_seed,
+        run_idx,
         run_name,
-        center_pwm,
-        amplitude_pwm,
+        center_us,
+        amplitude_us,
         samples_per_period,
-        crest_factor,
+        crest,
     )
 
     log_pre_run_baseline(
         cfg,
         state,
         f,
-        hx,
-        mav_batt,
-        escs,
+        servo,
         t0_ms,
         set_index,
         prps_seed,
         run_order_seed,
         run_name,
-        center_pwm,
-        offset_count,
+        center_us,
+        count_zero,
     )
 
     log_center_settle(
         cfg,
         state,
         f,
-        hx,
-        mav_batt,
-        escs,
+        servo,
         t0_ms,
         set_index,
         prps_seed,
         run_order_seed,
         run_name,
-        center_pwm,
-        offset_count,
+        center_us,
+        count_zero,
     )
 
     run_prps_periods(
         cfg,
         state,
         f,
-        hx,
-        mav_batt,
-        escs,
+        servo,
         t0_ms,
         set_index,
         prps_seed,
         run_order_seed,
         run_name,
-        center_pwm,
-        amplitude_pwm,
-        offset_count,
+        center_us,
+        amplitude_us,
+        count_zero,
         bins,
         phases,
         peak,
@@ -1270,16 +1051,14 @@ def run_prps_sequence(
         cfg,
         state,
         f,
-        hx,
-        mav_batt,
-        escs,
+        servo,
         t0_ms,
         set_index,
         prps_seed,
         run_order_seed,
         run_name,
-        center_pwm,
-        offset_count,
+        center_us,
+        count_zero,
     )
 
     f.flush()
@@ -1301,6 +1080,7 @@ def maybe_shuffle_runs(cfg, runs, run_order_seed):
     for i in range(len(runs) - 1, 0, -1):
         j = urandom.getrandbits(16) % (i + 1)
         runs[i], runs[j] = runs[j], runs[i]
+
     return runs
 
 
@@ -1316,6 +1096,23 @@ def get_waveform_seed(cfg, prps_seed):
     return cfg["BASE_PRPS_SEED"]
 
 
+def make_log_filename(cfg, set_index, prps_seed):
+    if len(cfg["TEST_RUNS"]) == 1:
+        run_name, center_us, amplitude_us = cfg["TEST_RUNS"][0]
+
+        return "{}_amp{}_seed{}.csv".format(
+            cfg["LOG_FILE_BASE"],
+            int(amplitude_us),
+            int(prps_seed),
+        )
+
+    return "{}_seed{}_set{:02d}.csv".format(
+        cfg["LOG_FILE_BASE"],
+        int(prps_seed),
+        int(set_index),
+    )
+
+
 def print_acquisition_set_banner(cfg, set_index, log_file, prps_seed, run_order_seed):
     print()
     print("============================================================")
@@ -1324,6 +1121,7 @@ def print_acquisition_set_banner(cfg, set_index, log_file, prps_seed, run_order_
     print("PRPS seed:", prps_seed)
     print("Run-order seed:", run_order_seed)
     print("Fixed run order:", cfg["FIXED_RUN_ORDER"])
+    print("New phases each set:", cfg["NEW_PHASES_EACH_SET"])
     print("============================================================")
 
 
@@ -1345,29 +1143,22 @@ def prepare_acquisition_set(cfg, set_index):
     log_file = make_log_filename(cfg, set_index, prps_seed)
     runs = maybe_shuffle_runs(cfg, cfg["TEST_RUNS"], run_order_seed)
 
-    print_acquisition_set_banner(
-        cfg,
-        set_index,
-        log_file,
-        prps_seed,
-        run_order_seed,
-    )
-
+    print_acquisition_set_banner(cfg, set_index, log_file, prps_seed, run_order_seed)
     print_planned_runs(cfg, runs)
 
     waveform_seed = get_waveform_seed(cfg, prps_seed)
     prps_plan = generate_prps_plan(cfg, waveform_seed)
 
-    requested_freqs, snapped_freqs, bins, phases, peak, samples_per_period, crest_factor = prps_plan
+    requested_freqs, snapped_freqs, bins, phases, peak, samples_per_period, crest = prps_plan
 
-    if cfg["SAVE_FREQUENCY_PLAN"]:
+    if cfg["SAVE_FREQUENCY_PLAN_TXT"]:
         write_prps_metadata_file(
             cfg,
             log_file,
             requested_freqs,
             snapped_freqs,
             bins,
-            crest_factor,
+            crest,
         )
 
     return prps_seed, run_order_seed, log_file, runs, prps_plan
@@ -1379,41 +1170,38 @@ def prepare_acquisition_set(cfg, set_index):
 
 
 def run_single_acquisition_file(cfg, state, log_file, runs, prps_plan, set_index,
-                                prps_seed, run_order_seed, hx, mav_batt,
-                                escs, offset_count):
+                                prps_seed, run_order_seed, servo, count_zero):
     with open(log_file, "w") as f:
         write_csv_header(f)
 
-        t0_ms = ticks_ms()
+        t0_ms = time.ticks_ms()
 
-        for run_name, center, amp in runs:
+        for run_idx in range(len(runs)):
+            run_name, center_us, amplitude_us = runs[run_idx]
+
             run_prps_sequence(
                 cfg=cfg,
                 state=state,
                 f=f,
-                hx=hx,
-                mav_batt=mav_batt,
-                escs=escs,
+                servo=servo,
                 t0_ms=t0_ms,
                 set_index=set_index,
                 prps_seed=prps_seed,
                 run_order_seed=run_order_seed,
+                run_idx=run_idx,
                 run_name=run_name,
-                center_pwm=center,
-                amplitude_pwm=amp,
-                offset_count=offset_count,
+                center_us=center_us,
+                amplitude_us=amplitude_us,
+                count_zero=count_zero,
                 prps_plan=prps_plan,
             )
 
-            print("Returning to safe PWM...")
-            set_pwm_us(cfg, escs, cfg["PWM_SAFE_US"])
-            sleep_ms(cfg["POST_RUN_IDLE_MS"])
-
-        set_pwm_us(cfg, escs, cfg["PWM_SAFE_US"])
-        sleep_ms(1000)
+            print("Returning to center.")
+            write_pwm_us(cfg, servo, center_us)
+            time.sleep_ms(cfg["POST_RUN_HOLD_MS"])
 
 
-def run_acquisition_set(cfg, set_index, hx, mav_batt, escs, offset_count):
+def run_acquisition_set(cfg, set_index, servo):
     state = {"sample_counter": 0}
 
     prps_seed, run_order_seed, log_file, runs, prps_plan = prepare_acquisition_set(
@@ -1421,7 +1209,9 @@ def run_acquisition_set(cfg, set_index, hx, mav_batt, escs, offset_count):
         set_index,
     )
 
-    print_battery_snapshot(mav_batt, "Before set")
+    # Use the first run center as the acquisition-set zero reference.
+    first_run_name, first_center_us, first_amp_us = runs[0]
+    count_zero = center_and_zero_encoder(cfg, servo, first_center_us)
 
     run_single_acquisition_file(
         cfg=cfg,
@@ -1432,54 +1222,47 @@ def run_acquisition_set(cfg, set_index, hx, mav_batt, escs, offset_count):
         set_index=set_index,
         prps_seed=prps_seed,
         run_order_seed=run_order_seed,
-        hx=hx,
-        mav_batt=mav_batt,
-        escs=escs,
-        offset_count=offset_count,
+        servo=servo,
+        count_zero=count_zero,
     )
 
-    print_battery_snapshot(mav_batt, "After set")
     print()
     print("Saved:", log_file)
 
     return log_file
 
 
-def cooldown_after_set_if_needed(cfg, escs, set_index):
+def cooldown_after_set_if_needed(cfg, servo, set_index):
     if set_index >= cfg["NUM_ACQUISITION_SETS"]:
         return
 
-    print("Returning to safe PWM for cooldown...")
-    set_pwm_us(cfg, escs, cfg["PWM_SAFE_US"])
+    if cfg["COOLDOWN_BETWEEN_SETS_MS"] <= 0:
+        return
+
+    print("Holding center during cooldown.")
+    write_pwm_us(cfg, servo, cfg["SERVO_CENTER_US"])
 
     cooldown_countdown(
-        "Cooldown between acquisition sets. Keep area safe.",
+        "Cooldown between acquisition sets.",
         cfg["COOLDOWN_BETWEEN_SETS_MS"],
     )
 
 
-def run_all_acquisition_sets(cfg, hx, mav_batt, escs, offset_count):
+def run_all_acquisition_sets(cfg, servo):
     saved_files = []
 
     for set_index in range(1, cfg["NUM_ACQUISITION_SETS"] + 1):
-        set_pwm_us(cfg, escs, cfg["PWM_SAFE_US"])
-        sleep_ms(1000)
-
-        if cfg["RETARE_EACH_SET"]:
-            offset_count = retare_load_cell_quick(cfg, hx)
+        print()
+        print("Preparing acquisition set", set_index, "of", cfg["NUM_ACQUISITION_SETS"])
 
         saved_file = run_acquisition_set(
             cfg=cfg,
             set_index=set_index,
-            hx=hx,
-            mav_batt=mav_batt,
-            escs=escs,
-            offset_count=offset_count,
+            servo=servo,
         )
 
         saved_files.append(saved_file)
-
-        cooldown_after_set_if_needed(cfg, escs, set_index)
+        cooldown_after_set_if_needed(cfg, servo, set_index)
 
     return saved_files
 
@@ -1490,25 +1273,21 @@ def run_all_acquisition_sets(cfg, hx, mav_batt, escs, offset_count):
 
 
 def setup_hardware(cfg):
-    hx = setup_hx711(cfg)
-    escs = setup_escs(cfg)
-    mav_batt = setup_mavlink_battery(cfg)
-    return hx, escs, mav_batt
+    setup_encoder(cfg)
+    servo = setup_servo(cfg)
+    return servo
 
 
-def safe_shutdown(cfg, hx, escs):
-    print("Stopping motors.")
+def safe_shutdown(cfg, servo):
+    print()
+    print("Centering servo and shutting down.")
 
-    if escs:
-        set_pwm_us(cfg, escs, cfg["PWM_SAFE_US"])
-        sleep_ms(1000)
+    if servo is not None:
+        write_pwm_us(cfg, servo, cfg["SERVO_CENTER_US"])
+        time.sleep_ms(500)
+        servo.deinit()
 
-    if hx is not None:
-        try:
-            print("Powering down HX711.")
-            hx.power_down()
-        except Exception:
-            pass
+    print("Done.")
 
 
 # ============================================================
@@ -1517,30 +1296,61 @@ def safe_shutdown(cfg, hx, escs):
 
 
 def print_startup_banner(cfg):
-    print("Dynamic PRPS thrust data acquisition")
-    print("Output base:", cfg["LOG_FILE_BASE"])
-    print("Number of acquisition sets:", cfg["NUM_ACQUISITION_SETS"])
-    print("Base PRPS seed:", cfg["BASE_PRPS_SEED"])
-    print("Cooldown between sets:", cfg["COOLDOWN_BETWEEN_SETS_MS"] / 1000.0, "s")
-    print("SCALE_G_PER_COUNT:", cfg["SCALE_G_PER_COUNT"])
-    print("SCALE_N_PER_COUNT:", cfg["SCALE_N_PER_COUNT"])
-    print("FORCE_SIGN:", cfg["FORCE_SIGN"])
+    print()
+    print("Servo PRPS logger")
+    print("Servo pin:", cfg["SERVO_PIN"])
+    print("Encoder pins:", cfg["ENC_A_PIN"], cfg["ENC_B_PIN"])
+    print("Counts per rev:", cfg["COUNTS_PER_REV"])
+    print("Rad per count:", cfg["RAD_PER_COUNT"])
+    print("Deg per count:", cfg["DEG_PER_COUNT"])
+
+    print()
+    print("Acquisition settings:")
+    print("  Output base:", cfg["LOG_FILE_BASE"])
+    print("  NUM_ACQUISITION_SETS:", cfg["NUM_ACQUISITION_SETS"])
+    print("  BASE_PRPS_SEED:", cfg["BASE_PRPS_SEED"])
+    print("  RUN_ORDER_SEED_OFFSET:", cfg["RUN_ORDER_SEED_OFFSET"])
+    print("  NEW_PHASES_EACH_SET:", cfg["NEW_PHASES_EACH_SET"])
+    print("  FIXED_RUN_ORDER:", cfg["FIXED_RUN_ORDER"])
+    print("  COOLDOWN_BETWEEN_SETS_MS:", cfg["COOLDOWN_BETWEEN_SETS_MS"])
+    print("  SAVE_FREQUENCY_PLAN_TXT:", cfg["SAVE_FREQUENCY_PLAN_TXT"])
+
+    print()
+    print("Servo safety:")
+    print("  SERVO_CENTER_US:", cfg["SERVO_CENTER_US"])
+    print("  SERVO_HARD_MIN_US:", cfg["SERVO_HARD_MIN_US"])
+    print("  SERVO_HARD_MAX_US:", cfg["SERVO_HARD_MAX_US"])
 
     print()
     print("PRPS settings:")
     print("  USE_MANUAL_FREQUENCY_LIST:", cfg["USE_MANUAL_FREQUENCY_LIST"])
+    print("  AUTO_FREQ_MIN_HZ:", cfg["AUTO_FREQ_MIN_HZ"])
+    print("  AUTO_FREQ_MAX_HZ:", cfg["AUTO_FREQ_MAX_HZ"])
+    print("  AUTO_NUM_FREQS:", cfg["AUTO_NUM_FREQS"])
+    print("  AUTO_FREQ_SPACING:", cfg["AUTO_FREQ_SPACING"])
     print("  PRPS_PERIOD_S:", cfg["PRPS_PERIOD_S"])
     print("  NUM_PERIODS_PER_RUN:", cfg["NUM_PERIODS_PER_RUN"])
     print("  COMMAND_UPDATE_DT_MS:", cfg["COMMAND_UPDATE_DT_MS"])
-    print("  USE_PHASE_SEARCH:", cfg["USE_PHASE_SEARCH"])
-    print("  NUM_PHASE_SEARCH_TRIALS:", cfg["NUM_PHASE_SEARCH_TRIALS"])
-    print("  NEW_PHASES_EACH_SET:", cfg["NEW_PHASES_EACH_SET"])
     print("  NORMALIZE_TO_PEAK:", cfg["NORMALIZE_TO_PEAK"])
+    print("  RANDOMIZE_PHASES:", cfg["RANDOMIZE_PHASES"])
+    print("  ROUND_PWM_TO_INT:", cfg["ROUND_PWM_TO_INT"])
+
+    print()
+    print("Test runs:")
+    for i in range(len(cfg["TEST_RUNS"])):
+        run_name, center_us, amplitude_us = cfg["TEST_RUNS"][i]
+        print(
+            "  run_idx", i,
+            "name", run_name,
+            "center_us", center_us,
+            "amplitude_us", amplitude_us,
+            "range", center_us - amplitude_us, "to", center_us + amplitude_us,
+        )
 
 
 def print_saved_files(saved_files):
     print()
-    print("All acquisition sets complete.")
+    print("All servo PRPS acquisition sets complete.")
     print("Saved files:")
     for filename in saved_files:
         print(" -", filename)
@@ -1554,42 +1364,24 @@ def print_saved_files(saved_files):
 def main():
     cfg = finalize_config(make_config())
 
-    hx = None
-    escs = []
-    mav_batt = None
+    servo = None
 
     try:
         print_startup_banner(cfg)
 
-        hx, escs, mav_batt = setup_hardware(cfg)
+        servo = setup_hardware(cfg)
 
-        # Let the system sit safely before first tare.
-        set_pwm_us(cfg, escs, cfg["PWM_SAFE_US"])
-        sleep_ms(1000)
-
-        offset_count = tare_load_cell(
-            cfg,
-            hx,
-            "Prepare for initial tare: motors off, no added load on load cell.",
+        countdown(
+            "Keep mechanism clear. PRPS test begins after countdown.",
+            cfg["INITIAL_COUNTDOWN_S"],
         )
 
-        arm_escs(cfg, escs)
-
-        saved_files = run_all_acquisition_sets(
-            cfg=cfg,
-            hx=hx,
-            mav_batt=mav_batt,
-            escs=escs,
-            offset_count=offset_count,
-        )
+        saved_files = run_all_acquisition_sets(cfg, servo)
 
         print_saved_files(saved_files)
 
-    except KeyboardInterrupt:
-        print("Interrupted.")
-
     finally:
-        safe_shutdown(cfg, hx, escs)
+        safe_shutdown(cfg, servo)
 
 
 main()
