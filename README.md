@@ -65,7 +65,14 @@ docs/objectives_requirements_constraints.md
 The project is organized around a repeatable controls-analysis workflow:
 
 ```
-1. Design and instrument the testbed2. Collect experimental input/output data3. Process and organize accepted/rejected datasets4. Identify static and dynamic actuator models5. Validate models against separate datasets6. Select simplified models for controller design7. Implement and compare controllers on hardware8. Document assumptions, limitations, and results
+1. Design and instrument the testbed
+2. Collect experimental input/output data
+3. Process and organize accepted/rejected datasets
+4. Identify static and dynamic actuator models
+5. Validate models against separate datasets
+6. Select simplified models for controller design
+7. Implement and compare controllers on hardware
+8. Document assumptions, limitations, and results
 ```
 
 ## Current Technical Focus
