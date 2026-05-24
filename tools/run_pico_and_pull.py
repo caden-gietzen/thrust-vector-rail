@@ -476,16 +476,12 @@ def expand_orchestration_segments(plan):
             "sequence": [...]
         }
 
-    For Option B / same seed per pass:
-        Pass 1:
-            region A seed 2001
-            region B seed 2001
-            region C seed 2001
-
-        Pass 2:
-            region A seed 2002
-            region B seed 2002
-            region C seed 2002
+    Seed behavior:
+        - If repeat_sequence includes base_prps_seed, PRPS seed fields are
+          injected into each segment config.
+        - If base_prps_seed is omitted, no seed fields are injected. This is
+          useful for non-PRPS calibration runs such as static sweeps, mismatch
+          sweeps, and half-revolution calibration.
     """
     if "segments" in plan:
         return plan["segments"]
@@ -494,55 +490,87 @@ def expand_orchestration_segments(plan):
     repeat = plan["repeat_sequence"]
 
     repeat_count = int(repeat["count"])
-    base_seed = int(repeat["base_prps_seed"])
-    seed_mode = repeat.get("seed_mode", "same_seed_per_pass")
-    seed_increment_per_pass = int(repeat.get("seed_increment_per_pass", 1))
-    run_order_seed_offset = int(repeat.get("run_order_seed_offset", 50000))
+
+    # PRPS seed injection is optional.
+    use_seed_injection = "base_prps_seed" in repeat
+
+    if use_seed_injection:
+        base_seed = int(repeat["base_prps_seed"])
+        seed_mode = repeat.get("seed_mode", "same_seed_per_pass")
+        seed_increment_per_pass = int(repeat.get("seed_increment_per_pass", 1))
+        run_order_seed_offset = int(repeat.get("run_order_seed_offset", 50000))
+    else:
+        base_seed = None
+        seed_mode = None
+        seed_increment_per_pass = None
+        run_order_seed_offset = None
 
     expanded_segments = []
 
     for repeat_index in range(1, repeat_count + 1):
-        pass_seed = base_seed + (repeat_index - 1) * seed_increment_per_pass
+
+        if use_seed_injection:
+            pass_seed = base_seed + (repeat_index - 1) * seed_increment_per_pass
+        else:
+            pass_seed = None
 
         for sequence_index, segment_template in enumerate(sequence, start=1):
-            if seed_mode == "same_seed_per_pass":
-                prps_seed = pass_seed
-
-            elif seed_mode == "increment_every_segment":
-                prps_seed = base_seed + (
-                    (repeat_index - 1) * len(sequence)
-                    + (sequence_index - 1)
-                )
-
-            else:
-                raise RuntimeError(
-                    "Unknown seed_mode: {}. Use 'same_seed_per_pass' "
-                    "or 'increment_every_segment'.".format(seed_mode)
-                )
-
             config = dict(segment_template["config"])
 
-            # Enforce one bounded Pico run per orchestrated segment.
-            config["NUM_ACQUISITION_SETS"] = 1
-            config["BASE_PRPS_SEED"] = prps_seed
-            config["RUN_ORDER_SEED_OFFSET"] = run_order_seed_offset
+            # Enforce one bounded Pico run per orchestrated segment only when
+            # the script uses this convention. This keeps PRPS behavior intact
+            # without forcing unrelated scripts to care about the field.
+            if "NUM_ACQUISITION_SETS" in config or use_seed_injection:
+                config["NUM_ACQUISITION_SETS"] = 1
+
+            prps_seed = None
+
+            if use_seed_injection:
+                if seed_mode == "same_seed_per_pass":
+                    prps_seed = pass_seed
+
+                elif seed_mode == "increment_every_segment":
+                    prps_seed = base_seed + (
+                        (repeat_index - 1) * len(sequence)
+                        + (sequence_index - 1)
+                    )
+
+                else:
+                    raise RuntimeError(
+                        "Unknown seed_mode: {}. Use 'same_seed_per_pass' "
+                        "or 'increment_every_segment'.".format(seed_mode)
+                    )
+
+                config["BASE_PRPS_SEED"] = prps_seed
+                config["RUN_ORDER_SEED_OFFSET"] = run_order_seed_offset
 
             segment_name = segment_template.get("name", f"sequence_{sequence_index:03d}")
 
-            expanded_segments.append(
-                {
-                    "name": "pass{:03d}_seq{:03d}_{}_seed{}".format(
-                        repeat_index,
-                        sequence_index,
-                        segment_name,
-                        prps_seed,
-                    ),
-                    "config": config,
-                    "repeat_index": repeat_index,
-                    "sequence_index": sequence_index,
-                    "prps_seed": prps_seed,
-                }
-            )
+            if use_seed_injection:
+                expanded_name = "pass{:03d}_seq{:03d}_{}_seed{}".format(
+                    repeat_index,
+                    sequence_index,
+                    segment_name,
+                    prps_seed,
+                )
+            else:
+                expanded_name = "pass{:03d}_seq{:03d}_{}".format(
+                    repeat_index,
+                    sequence_index,
+                    segment_name,
+                )
+
+            segment = {
+                "name": expanded_name,
+                "config": config,
+                "repeat_index": repeat_index,
+                "sequence_index": sequence_index,
+            }
+
+            if use_seed_injection:
+                segment["prps_seed"] = prps_seed
+
+            expanded_segments.append(segment)
 
     return expanded_segments
 
