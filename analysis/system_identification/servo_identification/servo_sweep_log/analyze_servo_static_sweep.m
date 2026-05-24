@@ -93,7 +93,23 @@ for fileIdx = 1:numel(dataFiles)
     fprintf("============================================================\n");
     fprintf("Data file:\n  %s\n", dataPath);
 
-    T = readtable(dataPath);
+    opts = detectImportOptions(dataPath, ...
+        "FileType", "text", ...
+        "Delimiter", ",", ...
+        "VariableNamingRule", "preserve");
+    
+    T = readtable(dataPath, opts);
+    
+    % Clean and standardize variable names.
+    rawNames = string(T.Properties.VariableNames);
+    cleanNames = strtrim(rawNames);
+    cleanNames = erase(cleanNames, char(65279));   % remove UTF-8 BOM if present
+    cleanNames = matlab.lang.makeValidName(cleanNames);
+    
+    T.Properties.VariableNames = cellstr(cleanNames);
+    
+    disp("Imported variable names:");
+    disp(string(T.Properties.VariableNames)');
 
     requiredVars = [
         "t_s"
@@ -145,12 +161,22 @@ for fileIdx = 1:numel(dataFiles)
         direction = inferSweepDirection(servo_us);
     end
 
-    allServoUs = [allServoUs; servo_us(:)];
-    allThetaDeg = [allThetaDeg; theta_deg(:)];
+    if ismember("segment", string(T.Properties.VariableNames))
+        segment = string(T.segment);
+        segment(ismissing(segment) | strlength(strtrim(segment)) == 0) = "sweep";
+    else
+        segment = strings(height(T), 1);
+        segment(:) = "sweep";
+    end
+    
+    isSweepSegment = segment == "sweep";
+
+    allServoUs = [allServoUs; servo_us(isSweepSegment)];
+    allThetaDeg = [allThetaDeg; theta_deg(isSweepSegment)];
 
     %% Fit Static Command-to-Angle Map
 
-    validFit = isfinite(servo_us) & isfinite(theta_deg);
+    validFit = isSweepSegment & isfinite(servo_us) & isfinite(theta_deg);
 
     p_all = polyfit(servo_us(validFit), theta_deg(validFit), 1);
 
@@ -166,7 +192,7 @@ for fileIdx = 1:numel(dataFiles)
     end
 
     centerWindow = abs(servo_us - SERVO_CENTER_US) <= CENTER_FIT_WINDOW_US;
-    validCenterFit = centerWindow & isfinite(servo_us) & isfinite(theta_deg);
+    validCenterFit = isSweepSegment & centerWindow & isfinite(servo_us) & isfinite(theta_deg);
 
     if nnz(validCenterFit) >= 3
         p_center = polyfit(servo_us(validCenterFit), theta_deg(validCenterFit), 1);
@@ -181,7 +207,10 @@ for fileIdx = 1:numel(dataFiles)
     %% Estimate Hysteresis Between Up and Down Sweeps
 
     [hysteresisTable, meanAbsHysteresisDeg, maxAbsHysteresisDeg] = ...
-        estimateHysteresisByCommand(servo_us, theta_deg, direction);
+        estimateHysteresisByCommand( ...
+            servo_us(isSweepSegment), ...
+            theta_deg(isSweepSegment), ...
+            direction(isSweepSegment));
 
     %% Print File Summary
 
@@ -256,9 +285,9 @@ for fileIdx = 1:numel(dataFiles)
     subtitle(dataFiles(fileIdx), "Interpreter", "none");
 
     figure;
-    plot(servo_us, theta_deg, "o", "LineWidth", 1.2);
+    plot(servo_us(isSweepSegment), theta_deg(isSweepSegment), "o", "LineWidth", 1.2);
     hold on;
-    plot(servo_us, theta_fit_deg, "-", "LineWidth", 1.5);
+    plot(servo_us(isSweepSegment), polyval(p_all, servo_us(isSweepSegment)), "-", "LineWidth", 1.5);
     xline(SERVO_CENTER_US, "--", "Configured center");
     yline(0, "--", "Zero angle");
     grid on;
@@ -270,8 +299,8 @@ for fileIdx = 1:numel(dataFiles)
 
     figure;
     hold on;
-    idxUp = direction == "up";
-    idxDown = direction == "down";
+    idxUp = isSweepSegment & direction == "up";
+    idxDown = isSweepSegment & direction == "down";
     plot(servo_us(idxUp), theta_deg(idxUp), "o", "LineWidth", 1.1);
     plot(servo_us(idxDown), theta_deg(idxDown), "o", "LineWidth", 1.1);
     grid on;

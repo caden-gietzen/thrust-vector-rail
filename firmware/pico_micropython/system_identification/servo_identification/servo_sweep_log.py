@@ -181,7 +181,7 @@ try:
                     theta_deg = count_to_theta_deg(count_delta)
                     theta_rad = count_to_theta_rad(count_delta)
 
-                    f.write("{},{:.3f},{},{},{},{},{},{},{:.6f},{:.8f}\n".format(
+                    f.write("{},{:.3f},{},{},{},{},{},{},{:.6f},{:.8f},{}\n".format(
                         t_ms,
                         t_s,
                         sweep_idx,
@@ -192,6 +192,7 @@ try:
                         count_delta,
                         theta_deg,
                         theta_rad,
+                        "sweep"
                     ))
 
                     f.flush()
