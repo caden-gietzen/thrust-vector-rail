@@ -65,7 +65,7 @@ def make_config():
         "NEW_PHASES_EACH_SET": True,
         "FIXED_RUN_ORDER": True,
         "COOLDOWN_BETWEEN_SETS_MS": 0,
-        "SAVE_FREQUENCY_PLAN_TXT": True,
+        "SAVE_FREQUENCY_PLAN_TXT": False,
 
         # ----------------------------------------------------
         # Hardware settings
@@ -121,7 +121,7 @@ def make_config():
         "PRPS_PERIOD_S": 20.0,
         "NUM_PERIODS_PER_RUN": 4,
         "COMMAND_UPDATE_DT_MS": 10,
-        "PRINT_FREQUENCY_PLAN": True,
+        "PRINT_FREQUENCY_PLAN": False,
         "RANDOMIZE_PHASES": True,
         "NORMALIZE_TO_PEAK": True,
         "ROUND_PWM_TO_INT": True,
