@@ -25,7 +25,7 @@ Final conclusion:
 
 | Item | Path |
 |---|---|
-| Raw data | [`data/raw/system_identification/servo_half_revolution_sweep_log/accepted/`](data/raw/system_identification/servo_identification/servo_half_revolution_sweep_log/accepted) |
+| Raw data | [`data/raw/system_identification/servo_identification/servo_half_revolution_sweep_log/accepted/`](data/raw/system_identification/servo_identification/servo_half_revolution_sweep_log/accepted) |
 | Analysis script | [`analysis/system_identification/servo_identification/servo_half_revolution_sweep_log`](analysis/system_identification/servo_identification/servo_half_revolution_sweep_log) |
 | Plots | [`plots/system_identification/servo_identification/servo_half_revolution_sweep_log`](plots/system_identification/servo_identification/servo_half_revolution_sweep_log) |
 | Procedure | [`experiments/servo_identification/procedure.md`](experiments/servo_identification/procedure.md) |

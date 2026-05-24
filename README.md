@@ -234,4 +234,4 @@ Although the testbed is one-dimensional, it supports development of skills relev
 
 ## Current Status
 
-Servo actuator identification is complete with a validated first-order-plus-delay model. Friction and thrust identification are the next steps before closed-loop controller design. Detailed results and model parameters are documented in `experiments/servo_identification/results.md`.
+Servo actuator identification is complete with a validated first-order-plus-delay model. Friction and thrust identification are the next steps before closed-loop controller design. Detailed results and model parameters are documented in [experiments/servo_identification/results.md](experiments/servo_identification/results.md).
