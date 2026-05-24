@@ -1,4 +1,4 @@
-﻿%% analyze_servo_prps_frequency_fit.m
+%% analyze_servo_prps_frequency_fit.m
 % Analyze servo PRPS data from Pico CSV logs using frequency-domain fitting.
 %
 % Supports older compact CSV columns:
@@ -29,7 +29,7 @@ clear; clc; close all;
 
 %% User options
 
-SAVE_FIGURES = false;
+SAVE_FIGURES = true;
 
 % File selection mode:
 %   true  = train on first N sorted CSV files, validate on next M files
@@ -68,7 +68,7 @@ INCLUDE_VALIDATION_ONLY_RUN_NAMES = false;
 %   to every validation CSV file individually, regardless of run_name stored inside
 %   the validation file. This is the right mode for testing whether an amp100
 %   model generalizes to amp200/amp300/amp400 data.
-VALIDATE_MODEL_ON_ALL_VALIDATION_FILES = true;
+VALIDATE_MODEL_ON_ALL_VALIDATION_FILES = false;
 
 % Local model generalization mode:
 %   After fitting one best model per training run/amplitude, score every local
@@ -83,13 +83,13 @@ SCORE_LOCAL_MODELS_ON_ALL_TRAINING_RUNS = true;
 FIT_GLOBAL_MODEL_ON_ALL_TRAINING_RUNS = true;
 
 % If true, plot global model against each individual empirical FRF.
-PLOT_GLOBAL_MODEL_PER_RUN = true;
+PLOT_GLOBAL_MODEL_PER_RUN = false;
 
 % If true, plot global model time-domain prediction against each individual
 % training file/run and validation file. This is separate from the local model
 % time-domain plots.
-PLOT_GLOBAL_TIME_DOMAIN_ON_TRAINING_FILES = true;
-PLOT_GLOBAL_TIME_DOMAIN_ON_VALIDATION_FILES = true;
+PLOT_GLOBAL_TIME_DOMAIN_ON_TRAINING_FILES = false;
+PLOT_GLOBAL_TIME_DOMAIN_ON_VALIDATION_FILES = false;
 
 % If true, only plot the global best model in time-domain overlays.
 % Usually keep true to avoid clutter.
@@ -115,7 +115,7 @@ DEFAULT_SERVO_CENTER_US = 1450;
 % Therefore use -1 so the fitted plant has positive low-frequency gain.
 SERVO_OUTPUT_SIGN = -1;
 
-DEFAULT_FREQ_LABEL = "0p1_to_3Hz";
+DEFAULT_FREQ_LABEL = "0.1_to_3Hz";
 
 %% PRPS / frequency extraction options
 
@@ -167,7 +167,7 @@ FIT_SECOND_ORDER_LAG_DELAY      = true;
 %   "lowest_validation_error"
 %   "lowest_training_error"
 %   "simplicity_tolerance"
-MODEL_SELECTION_MODE = "lowest_training_error";
+MODEL_SELECTION_MODE = "simplicity_tolerance";
 SIMPLE_MODEL_RELATIVE_TOLERANCE = 0.05;
 
 %   "relative_complex"
@@ -196,21 +196,41 @@ MAX_GAIN_ABS = 0.01;
 
 %% Time-domain translation options
 
-PLOT_TIME_DOMAIN_TRANSLATION_TRAINING   = true;
+PLOT_TIME_DOMAIN_TRANSLATION_TRAINING   = false;
 PLOT_TIME_DOMAIN_TRANSLATION_VALIDATION = true;
+
+% Windowed time-domain plot: global model vs each validation file,
+% showing only the specified time window. lsim runs on the full signal;
+% only the display is cropped. Respects MAX_VALIDATION_FILES_TO_PLOT.
+PLOT_GLOBAL_TIME_DOMAIN_VALIDATION_WINDOW = true;
+GLOBAL_TIME_DOMAIN_WINDOW_START_S = 30;
+GLOBAL_TIME_DOMAIN_WINDOW_END_S   = 40;
 
 CENTER_TIME_DOMAIN_SIGNALS = true;
 
 %% Plot toggles
 
-PLOT_TRAINING_EMPIRICAL_BODE_WITH_FITS      = false;
+PLOT_TRAINING_EMPIRICAL_BODE_WITH_FITS      = true;
 PLOT_VALIDATION_BODE_VS_TRAINING_MODEL      = false;
 PLOT_TRAINING_VS_VALIDATION_EMPIRICAL_BODE  = false;
 PLOT_COHERENCE_BY_RUN                       = false;
 PLOT_MODEL_COMPARISON_BAR                   = true;
+PLOT_NORMALIZED_BODE                        = true;
+PLOT_AMPLITUDE_GENERALIZATION_CURVE         = true;
 
-PLOT_TIME_DOMAIN_TRANSLATION_BEST_ONLY      = true;
-PLOT_ALL_TIME_DOMAIN_MODEL_TRANSLATIONS     = false;
+PLOT_TIME_DOMAIN_TRANSLATION_BEST_ONLY_TRAINING    = false;
+PLOT_TIME_DOMAIN_TRANSLATION_BEST_ONLY_VALIDATION  = false;
+PLOT_ALL_TIME_DOMAIN_MODEL_TRANSLATIONS            = false;
+
+% Maximum number of validation files for which per-file plots are generated
+% inside the cross-amplitude and global-model validation loops.
+% Scoring runs for all files regardless of this limit.
+% Set to inf to plot every file.
+MAX_VALIDATION_FILES_TO_PLOT = 5;
+
+% Whitelist of PRPS amplitudes [µs] for which Bode and time-domain plots
+% are generated. Empty = plot all amplitudes. Example: [500, 1000]
+PLOT_AMPLITUDE_FILTER_US = [1000];
 
 PLOT_RAW_PRPS_TIME_SNIPPET                  = false;
 PLOT_INPUT_SPECTRUM_DIAGNOSTIC              = false;
@@ -420,6 +440,7 @@ globalSummaryRows = cell(0, 16);
 for r = 1:numel(runNames)
     runName = runNames(r);
     modelKey = matlab.lang.makeValidName(runName);
+    runAmpUs = inferAmplitudeFromRunName(runName);
 
     fprintf("\n============================================================\n");
     fprintf("Run: %s\n", runName);
@@ -491,7 +512,7 @@ for r = 1:numel(runNames)
         plotInputSpectrumDiagnostic(trainFrf, runName, "training");
     end
 
-    if PLOT_COHERENCE_BY_RUN
+    if PLOT_COHERENCE_BY_RUN && isAmplitudeAllowed(runAmpUs, PLOT_AMPLITUDE_FILTER_US)
         plotCoherence(trainFrf, valFrf, runName);
     end
 
@@ -604,24 +625,34 @@ for r = 1:numel(runNames)
         };
     end
 
-    if PLOT_TRAINING_EMPIRICAL_BODE_WITH_FITS
+    if PLOT_TRAINING_EMPIRICAL_BODE_WITH_FITS && isAmplitudeAllowed(runAmpUs, PLOT_AMPLITUDE_FILTER_US)
         plotEmpiricalBodeWithFits(trainFrf, candidateModels, bestModel, runName, "training", ...
             MIN_COHERENCE_FOR_FIT, PLOT_REJECTED_FREQ_POINTS, bandwidthHz);
+        if PLOT_NORMALIZED_BODE
+            plotEmpiricalBodeWithFits(trainFrf, candidateModels, bestModel, runName, "training", ...
+                MIN_COHERENCE_FOR_FIT, PLOT_REJECTED_FREQ_POINTS, bandwidthHz, true);
+        end
     end
 
-    if PLOT_VALIDATION_BODE_VS_TRAINING_MODEL && ~isempty(valFrf.f_Hz)
+    if PLOT_VALIDATION_BODE_VS_TRAINING_MODEL && ~isempty(valFrf.f_Hz) && isAmplitudeAllowed(runAmpUs, PLOT_AMPLITUDE_FILTER_US)
         plotValidationBodeVsTrainingModel(valFrf, bestModel, runName, MIN_COHERENCE_FOR_FIT);
+        if PLOT_NORMALIZED_BODE
+            plotValidationBodeVsTrainingModel(valFrf, bestModel, runName, MIN_COHERENCE_FOR_FIT, true);
+        end
     end
 
-    if PLOT_TRAINING_VS_VALIDATION_EMPIRICAL_BODE && ~isempty(valFrf.f_Hz)
+    if PLOT_TRAINING_VS_VALIDATION_EMPIRICAL_BODE && ~isempty(valFrf.f_Hz) && isAmplitudeAllowed(runAmpUs, PLOT_AMPLITUDE_FILTER_US)
         plotTrainingVsValidationEmpiricalBode(trainFrf, valFrf, runName, MIN_COHERENCE_FOR_FIT);
+        if PLOT_NORMALIZED_BODE
+            plotTrainingVsValidationEmpiricalBode(trainFrf, valFrf, runName, MIN_COHERENCE_FOR_FIT, true);
+        end
     end
 
-    if PLOT_MODEL_COMPARISON_BAR
+    if PLOT_MODEL_COMPARISON_BAR && isAmplitudeAllowed(runAmpUs, PLOT_AMPLITUDE_FILTER_US)
         plotModelComparison(candidateModels, runName);
     end
 
-    if PLOT_TIME_DOMAIN_TRANSLATION_TRAINING
+    if PLOT_TIME_DOMAIN_TRANSLATION_TRAINING && isAmplitudeAllowed(runAmpUs, PLOT_AMPLITUDE_FILTER_US)
         plotTimeDomainTranslationForDataset( ...
             Dtrain, ...
             bestModel, ...
@@ -629,11 +660,11 @@ for r = 1:numel(runNames)
             runName, ...
             "training", ...
             CENTER_TIME_DOMAIN_SIGNALS, ...
-            PLOT_TIME_DOMAIN_TRANSLATION_BEST_ONLY, ...
+            PLOT_TIME_DOMAIN_TRANSLATION_BEST_ONLY_TRAINING, ...
             PLOT_ALL_TIME_DOMAIN_MODEL_TRANSLATIONS);
     end
 
-    if PLOT_TIME_DOMAIN_TRANSLATION_VALIDATION && ~isempty(Tval)
+    if PLOT_TIME_DOMAIN_TRANSLATION_VALIDATION && ~isempty(Tval) && isAmplitudeAllowed(runAmpUs, PLOT_AMPLITUDE_FILTER_US)
         DvalTime = getRunData(Tval, runName, USE_ONLY_PRPS_SEGMENT);
 
         if height(DvalTime) >= MIN_SAMPLES_PER_PERIOD
@@ -644,7 +675,7 @@ for r = 1:numel(runNames)
                 runName, ...
                 "validation", ...
                 CENTER_TIME_DOMAIN_SIGNALS, ...
-                PLOT_TIME_DOMAIN_TRANSLATION_BEST_ONLY, ...
+                PLOT_TIME_DOMAIN_TRANSLATION_BEST_ONLY_VALIDATION, ...
                 PLOT_ALL_TIME_DOMAIN_MODEL_TRANSLATIONS);
         end
     end
@@ -664,8 +695,11 @@ for r = 1:numel(runNames)
 
         fprintf("\nCross-amplitude validation for training model: %s\n", runName);
 
+        crossValPlotCount = 0;
+
         for vf = 1:numel(validationSourceFiles)
             valSourceFile = validationSourceFiles(vf);
+            valAmpUs = inferAmplitudeFromSourceFile(valSourceFile);
             DvalCross = getSourceFileData(Tval, valSourceFile, USE_ONLY_PRPS_SEGMENT);
 
             if height(DvalCross) < MIN_SAMPLES_PER_PERIOD
@@ -719,24 +753,35 @@ for r = 1:numel(runNames)
                 crossScore.validation_phase_rmse_deg ...
             };
 
-            if PLOT_VALIDATION_BODE_VS_TRAINING_MODEL
-                plotValidationBodeVsTrainingModel( ...
-                    valFrfCross, ...
-                    bestModel, ...
-                    runName + " model on " + valLabel, ...
-                    MIN_COHERENCE_FOR_FIT);
-            end
+            if crossValPlotCount < MAX_VALIDATION_FILES_TO_PLOT && isAmplitudeAllowed(valAmpUs, PLOT_AMPLITUDE_FILTER_US)
+                if PLOT_VALIDATION_BODE_VS_TRAINING_MODEL
+                    plotValidationBodeVsTrainingModel( ...
+                        valFrfCross, ...
+                        bestModel, ...
+                        runName + " model on " + valLabel, ...
+                        MIN_COHERENCE_FOR_FIT);
+                    if PLOT_NORMALIZED_BODE
+                        plotValidationBodeVsTrainingModel( ...
+                            valFrfCross, ...
+                            bestModel, ...
+                            runName + " model on " + valLabel, ...
+                            MIN_COHERENCE_FOR_FIT, true);
+                    end
+                end
 
-            if PLOT_TIME_DOMAIN_TRANSLATION_VALIDATION
-                plotTimeDomainTranslationForDataset( ...
-                    DvalCross, ...
-                    bestModel, ...
-                    candidateModels, ...
-                    runName + " model on " + valLabel, ...
-                    "cross_validation", ...
-                    CENTER_TIME_DOMAIN_SIGNALS, ...
-                    PLOT_TIME_DOMAIN_TRANSLATION_BEST_ONLY, ...
-                    PLOT_ALL_TIME_DOMAIN_MODEL_TRANSLATIONS);
+                if PLOT_TIME_DOMAIN_TRANSLATION_VALIDATION
+                    plotTimeDomainTranslationForDataset( ...
+                        DvalCross, ...
+                        bestModel, ...
+                        candidateModels, ...
+                        runName + " model on " + valLabel, ...
+                        "cross_validation", ...
+                        CENTER_TIME_DOMAIN_SIGNALS, ...
+                        PLOT_TIME_DOMAIN_TRANSLATION_BEST_ONLY_VALIDATION, ...
+                        PLOT_ALL_TIME_DOMAIN_MODEL_TRANSLATIONS);
+                end
+
+                crossValPlotCount = crossValPlotCount + 1;
             end
         end
     end
@@ -895,6 +940,11 @@ if FIT_GLOBAL_MODEL_ON_ALL_TRAINING_RUNS && ~isempty(fieldnames(trainingFrfs))
             plotEmpiricalBodeWithFits(globalFrf, globalCandidateModels, globalBestModel, ...
                 "GLOBAL_ALL_TRAINING_AMPLITUDES", "training", ...
                 MIN_COHERENCE_FOR_FIT, PLOT_REJECTED_FREQ_POINTS, globalBandwidthHz);
+            if PLOT_NORMALIZED_BODE
+                plotEmpiricalBodeWithFits(globalFrf, globalCandidateModels, globalBestModel, ...
+                    "GLOBAL_ALL_TRAINING_AMPLITUDES", "training", ...
+                    MIN_COHERENCE_FOR_FIT, PLOT_REJECTED_FREQ_POINTS, globalBandwidthHz, true);
+            end
         end
 
         % Score global model against each individual training FRF.
@@ -939,6 +989,13 @@ if FIT_GLOBAL_MODEL_ON_ALL_TRAINING_RUNS && ~isempty(fieldnames(trainingFrfs))
                     globalBestModel, ...
                     "GLOBAL model on " + targetLabel, ...
                     MIN_COHERENCE_FOR_FIT);
+                if PLOT_NORMALIZED_BODE
+                    plotValidationBodeVsTrainingModel( ...
+                        targetFrf, ...
+                        globalBestModel, ...
+                        "GLOBAL model on " + targetLabel, ...
+                        MIN_COHERENCE_FOR_FIT, true);
+                end
             end
 
             if PLOT_GLOBAL_TIME_DOMAIN_ON_TRAINING_FILES
@@ -963,8 +1020,12 @@ if FIT_GLOBAL_MODEL_ON_ALL_TRAINING_RUNS && ~isempty(fieldnames(trainingFrfs))
             validationSourceFiles = unique(string(Tval.source_file), "stable");
 
             fprintf("\nGlobal model scored against validation files:\n");
+
+            globalValPlotCount = 0;
+
             for vf = 1:numel(validationSourceFiles)
                 valSourceFile = validationSourceFiles(vf);
+                valAmpUs = inferAmplitudeFromSourceFile(valSourceFile);
                 DvalGlobal = getSourceFileData(Tval, valSourceFile, USE_ONLY_PRPS_SEGMENT);
 
                 if height(DvalGlobal) < MIN_SAMPLES_PER_PERIOD
@@ -1018,24 +1079,49 @@ if FIT_GLOBAL_MODEL_ON_ALL_TRAINING_RUNS && ~isempty(fieldnames(trainingFrfs))
                     globalScore.validation_phase_rmse_deg ...
                 };
 
-                if PLOT_GLOBAL_MODEL_PER_RUN
-                    plotValidationBodeVsTrainingModel( ...
-                        valFrfGlobal, ...
-                        globalBestModel, ...
-                        "GLOBAL model on " + valLabel, ...
-                        MIN_COHERENCE_FOR_FIT);
-                end
+                if globalValPlotCount < MAX_VALIDATION_FILES_TO_PLOT && isAmplitudeAllowed(valAmpUs, PLOT_AMPLITUDE_FILTER_US)
+                    if PLOT_GLOBAL_MODEL_PER_RUN
+                        plotValidationBodeVsTrainingModel( ...
+                            valFrfGlobal, ...
+                            globalBestModel, ...
+                            "GLOBAL model on " + valLabel, ...
+                            MIN_COHERENCE_FOR_FIT);
+                        if PLOT_NORMALIZED_BODE
+                            plotValidationBodeVsTrainingModel( ...
+                                valFrfGlobal, ...
+                                globalBestModel, ...
+                                "GLOBAL model on " + valLabel, ...
+                                MIN_COHERENCE_FOR_FIT, true);
+                        end
+                    end
 
-                if PLOT_GLOBAL_TIME_DOMAIN_ON_VALIDATION_FILES
-                    plotTimeDomainTranslationForDataset( ...
-                        DvalGlobal, ...
-                        globalBestModel, ...
-                        globalCandidateModels, ...
-                        "GLOBAL model on " + valLabel, ...
-                        "global_validation", ...
-                        CENTER_TIME_DOMAIN_SIGNALS, ...
-                        PLOT_GLOBAL_TIME_DOMAIN_BEST_ONLY, ...
-                        false);
+                    if PLOT_GLOBAL_TIME_DOMAIN_ON_VALIDATION_FILES
+                        plotTimeDomainTranslationForDataset( ...
+                            DvalGlobal, ...
+                            globalBestModel, ...
+                            globalCandidateModels, ...
+                            "GLOBAL model on " + valLabel, ...
+                            "global_validation", ...
+                            CENTER_TIME_DOMAIN_SIGNALS, ...
+                            PLOT_GLOBAL_TIME_DOMAIN_BEST_ONLY, ...
+                            false);
+                    end
+
+                    if PLOT_GLOBAL_TIME_DOMAIN_VALIDATION_WINDOW
+                        plotTimeDomainTranslationForDataset( ...
+                            DvalGlobal, ...
+                            globalBestModel, ...
+                            globalCandidateModels, ...
+                            "GLOBAL model on " + valLabel, ...
+                            "global_validation", ...
+                            CENTER_TIME_DOMAIN_SIGNALS, ...
+                            PLOT_GLOBAL_TIME_DOMAIN_BEST_ONLY, ...
+                            false, ...
+                            GLOBAL_TIME_DOMAIN_WINDOW_START_S, ...
+                            GLOBAL_TIME_DOMAIN_WINDOW_END_S);
+                    end
+
+                    globalValPlotCount = globalValPlotCount + 1;
                 end
             end
         end
@@ -1175,6 +1261,12 @@ if ~isempty(globalModelRows)
     disp(globalModelTable);
 else
     fprintf("\nNo global model per-dataset results generated.\n");
+end
+
+%% Amplitude generalization curve
+
+if PLOT_AMPLITUDE_GENERALIZATION_CURVE
+    plotAmplitudeGeneralizationCurve(crossValidationRows, globalModelRows);
 end
 
 %% Save figures
@@ -1348,6 +1440,10 @@ function ampUs = inferAmplitudeFromRunName(runName)
             ampUs(i) = str2double(token{1});
         end
     end
+end
+
+function allowed = isAmplitudeAllowed(ampUs, filterUs)
+    allowed = isempty(filterUs) || any(ampUs == filterUs);
 end
 
 function D = getRunData(T, runName, useOnlyPrpsSegment)
@@ -2361,7 +2457,11 @@ end
 
 %% Plotting functions
 
-function plotEmpiricalBodeWithFits(frf, models, bestModel, runName, datasetLabel, minCoherence, plotRejected, bandwidthHz)
+function plotEmpiricalBodeWithFits(frf, models, bestModel, runName, datasetLabel, minCoherence, plotRejected, bandwidthHz, normalize)
+    if nargin < 9
+        normalize = false;
+    end
+
     f = frf.f_Hz(:);
     G = frf.G_emp(:);
     coh = frf.coherence(:);
@@ -2371,15 +2471,25 @@ function plotEmpiricalBodeWithFits(frf, models, bestModel, runName, datasetLabel
     fFine = logspace(log10(min(f)), log10(max(f)), 500).';
     wFine = 2*pi*fFine;
 
+    if normalize
+        refDb = 20*log10(bestModel.K);
+        magLabel = "Normalized Magnitude (dB re DC gain)";
+        titlePrefix = "Normalized ";
+    else
+        refDb = 0;
+        magLabel = "Magnitude (dB, rad/us)";
+        titlePrefix = "";
+    end
+
     figure;
     hold on; grid on;
 
     if plotRejected && any(~good)
-        semilogx(f(~good), 20*log10(abs(G(~good))), "x", ...
+        semilogx(f(~good), 20*log10(abs(G(~good))) - refDb, "x", ...
             "DisplayName", "Rejected empirical points");
     end
 
-    semilogx(f(good), 20*log10(abs(G(good))), "o", ...
+    semilogx(f(good), 20*log10(abs(G(good))) - refDb, "o", ...
         "LineWidth", 1.2, ...
         "DisplayName", "Empirical PRPS FRF");
 
@@ -2395,7 +2505,7 @@ function plotEmpiricalBodeWithFits(frf, models, bestModel, runName, datasetLabel
             name = "Candidate: " + model.model_type;
         end
 
-        semilogx(fFine, 20*log10(abs(Gfit)), "LineWidth", lw, ...
+        semilogx(fFine, 20*log10(abs(Gfit)) - refDb, "LineWidth", lw, ...
             "DisplayName", name);
     end
 
@@ -2405,8 +2515,8 @@ function plotEmpiricalBodeWithFits(frf, models, bestModel, runName, datasetLabel
     end
 
     xlabel("Frequency (Hz)");
-    ylabel("Magnitude (dB, rad/us)");
-    title("Training Empirical Bode Magnitude with Frequency-Domain Fits - " + datasetLabel + " - " + runName, ...
+    ylabel(magLabel);
+    title(titlePrefix + "Training Empirical Bode Magnitude with Frequency-Domain Fits - " + datasetLabel + " - " + runName, ...
         "Interpreter", "none");
     legend("Location", "best", "Interpreter", "none");
 
@@ -2440,12 +2550,16 @@ function plotEmpiricalBodeWithFits(frf, models, bestModel, runName, datasetLabel
 
     xlabel("Frequency (Hz)");
     ylabel("Phase (deg)");
-    title("Training Empirical Bode Phase with Frequency-Domain Fits - " + datasetLabel + " - " + runName, ...
+    title(titlePrefix + "Training Empirical Bode Phase with Frequency-Domain Fits - " + datasetLabel + " - " + runName, ...
         "Interpreter", "none");
     legend("Location", "best", "Interpreter", "none");
 end
 
-function plotValidationBodeVsTrainingModel(valFrf, bestModel, runName, minCoherence)
+function plotValidationBodeVsTrainingModel(valFrf, bestModel, runName, minCoherence, normalize)
+    if nargin < 5
+        normalize = false;
+    end
+
     f = valFrf.f_Hz(:);
     G = valFrf.G_emp(:);
     coh = valFrf.coherence(:);
@@ -2456,25 +2570,35 @@ function plotValidationBodeVsTrainingModel(valFrf, bestModel, runName, minCohere
     wFine = 2*pi*fFine;
     Gfit = evalFrequencyModel(bestModel.model_type, bestModel.params, wFine);
 
+    if normalize
+        refDb = 20*log10(bestModel.K);
+        magLabel = "Normalized Magnitude (dB re DC gain)";
+        titlePrefix = "Normalized ";
+    else
+        refDb = 0;
+        magLabel = "Magnitude (dB, rad/us)";
+        titlePrefix = "";
+    end
+
     figure;
     hold on; grid on;
 
-    semilogx(f(good), 20*log10(abs(G(good))), "o", ...
+    semilogx(f(good), 20*log10(abs(G(good))) - refDb, "o", ...
         "LineWidth", 1.2, ...
         "DisplayName", "Validation empirical FRF");
 
     if any(~good)
-        semilogx(f(~good), 20*log10(abs(G(~good))), "x", ...
+        semilogx(f(~good), 20*log10(abs(G(~good))) - refDb, "x", ...
             "DisplayName", "Validation low-coherence points");
     end
 
-    semilogx(fFine, 20*log10(abs(Gfit)), "-", ...
+    semilogx(fFine, 20*log10(abs(Gfit)) - refDb, "-", ...
         "LineWidth", 2.0, ...
         "DisplayName", "Training fitted model");
 
     xlabel("Frequency (Hz)");
-    ylabel("Magnitude (dB, rad/us)");
-    title("Validation Bode vs Training-Fitted Model - Magnitude - " + runName, ...
+    ylabel(magLabel);
+    title(titlePrefix + "Validation Bode vs Training-Fitted Model - Magnitude - " + runName, ...
         "Interpreter", "none");
     legend("Location", "best", "Interpreter", "none");
 
@@ -2496,29 +2620,48 @@ function plotValidationBodeVsTrainingModel(valFrf, bestModel, runName, minCohere
 
     xlabel("Frequency (Hz)");
     ylabel("Phase (deg)");
-    title("Validation Bode vs Training-Fitted Model - Phase - " + runName, ...
+    title(titlePrefix + "Validation Bode vs Training-Fitted Model - Phase - " + runName, ...
         "Interpreter", "none");
     legend("Location", "best", "Interpreter", "none");
 end
 
-function plotTrainingVsValidationEmpiricalBode(trainFrf, valFrf, runName, minCoherence)
+function plotTrainingVsValidationEmpiricalBode(trainFrf, valFrf, runName, minCoherence, normalize)
+    if nargin < 5
+        normalize = false;
+    end
+
     trainGood = trainFrf.coherence >= minCoherence;
     valGood = valFrf.coherence >= minCoherence;
+
+    if normalize
+        firstGoodIdx = find(trainGood, 1);
+        if ~isempty(firstGoodIdx)
+            refDb = 20*log10(abs(trainFrf.G_emp(firstGoodIdx)));
+        else
+            refDb = 0;
+        end
+        magLabel = "Normalized Magnitude (dB re training low-freq)";
+        titlePrefix = "Normalized ";
+    else
+        refDb = 0;
+        magLabel = "Magnitude (dB, rad/us)";
+        titlePrefix = "";
+    end
 
     figure;
     hold on; grid on;
 
-    semilogx(trainFrf.f_Hz(trainGood), 20*log10(abs(trainFrf.G_emp(trainGood))), "o-", ...
+    semilogx(trainFrf.f_Hz(trainGood), 20*log10(abs(trainFrf.G_emp(trainGood))) - refDb, "o-", ...
         "LineWidth", 1.2, ...
         "DisplayName", "Training empirical");
 
-    semilogx(valFrf.f_Hz(valGood), 20*log10(abs(valFrf.G_emp(valGood))), "s--", ...
+    semilogx(valFrf.f_Hz(valGood), 20*log10(abs(valFrf.G_emp(valGood))) - refDb, "s--", ...
         "LineWidth", 1.2, ...
         "DisplayName", "Validation empirical");
 
     xlabel("Frequency (Hz)");
-    ylabel("Magnitude (dB, rad/us)");
-    title("Training vs Validation Empirical Bode - Magnitude - " + runName, ...
+    ylabel(magLabel);
+    title(titlePrefix + "Training vs Validation Empirical Bode - Magnitude - " + runName, ...
         "Interpreter", "none");
     legend("Location", "best", "Interpreter", "none");
 
@@ -2535,7 +2678,7 @@ function plotTrainingVsValidationEmpiricalBode(trainFrf, valFrf, runName, minCoh
 
     xlabel("Frequency (Hz)");
     ylabel("Phase (deg)");
-    title("Training vs Validation Empirical Bode - Phase - " + runName, ...
+    title(titlePrefix + "Training vs Validation Empirical Bode - Phase - " + runName, ...
         "Interpreter", "none");
     legend("Location", "best", "Interpreter", "none");
 end
@@ -2605,7 +2748,14 @@ function plotTimeDomainTranslationForDataset( ...
     datasetLabel, ...
     centerSignals, ...
     plotBestOnly, ...
-    plotAllModels)
+    plotAllModels, ...
+    tWindowStart_s, ...
+    tWindowEnd_s)
+
+    if nargin < 9,  tWindowStart_s = -inf; end
+    if nargin < 10, tWindowEnd_s   =  inf; end
+
+    windowed = isfinite(tWindowStart_s) || isfinite(tWindowEnd_s);
 
     if isempty(D) || height(D) < 5
         return;
@@ -2661,10 +2811,25 @@ function plotTimeDomainTranslationForDataset( ...
             yOffset = 0;
         end
 
+        % Determine display mask — lsim always runs on the full signal.
+        if windowed
+            plotMask = tUniform >= tWindowStart_s & tUniform <= tWindowEnd_s;
+            windowSuffix = sprintf(" [%.0f\x2013%.0f s]", tWindowStart_s, tWindowEnd_s);
+        else
+            plotMask = true(size(tUniform));
+            windowSuffix = "";
+        end
+
+        if ~any(plotMask)
+            warning("Window [%.0f, %.0f] s contains no samples for %s %s.", ...
+                tWindowStart_s, tWindowEnd_s, datasetLabel, runName);
+            break;
+        end
+
         figure;
         hold on; grid on;
 
-        plot(tUniform, yUniform * 180/pi, "LineWidth", 1.2, ...
+        plot(tUniform(plotMask), yUniform(plotMask) * 180/pi, "LineWidth", 1.2, ...
             "DisplayName", "Measured servo angle");
 
         if plotBestOnly
@@ -2673,7 +2838,7 @@ function plotTimeDomainTranslationForDataset( ...
             try
                 yModel = lsim(sys, uInput, tUniform) + yOffset;
 
-                plot(tUniform, yModel * 180/pi, "--", "LineWidth", 1.8, ...
+                plot(tUniform(plotMask), yModel(plotMask) * 180/pi, "--", "LineWidth", 1.8, ...
                     "DisplayName", "Best frequency-fit model: " + bestModel.model_type);
             catch ME
                 warning("lsim failed for best model %s / %s: %s", ...
@@ -2688,7 +2853,7 @@ function plotTimeDomainTranslationForDataset( ...
                 try
                     yModel = lsim(sys, uInput, tUniform) + yOffset;
 
-                    plot(tUniform, yModel * 180/pi, "--", "LineWidth", 1.0, ...
+                    plot(tUniform(plotMask), yModel(plotMask) * 180/pi, "--", "LineWidth", 1.0, ...
                         "DisplayName", candidateModels(m).model_type);
                 catch ME
                     warning("lsim failed for candidate model %s / %s / %s: %s", ...
@@ -2700,7 +2865,7 @@ function plotTimeDomainTranslationForDataset( ...
         xlabel("Time (s)");
         ylabel("Servo Angle (deg)");
         title("Time-Domain Translation of Frequency Fit - " + datasetLabel + ...
-            " - " + runName + " - group " + string(uniqueGroups(g)), ...
+            " - " + runName + windowSuffix, ...
             "Interpreter", "none");
         legend("Location", "best", "Interpreter", "none");
 
@@ -2779,6 +2944,84 @@ function plotSampleTimeDiagnostic(D, runName, datasetLabel)
     ylabel("Sample interval \Deltat (s)");
     title("Servo Sample-Time Diagnostic - " + datasetLabel + " - " + runName, ...
         "Interpreter", "none");
+end
+
+function plotAmplitudeGeneralizationCurve(crossValidationRows, globalModelRows)
+    % crossValidationRows cols: training_file, training_run_name, model_type,
+    %   K, tau1, tau2, delay, validation_file, validation_label,
+    %   cross_validation_weighted_error, mag_rmse_dB, phase_rmse_deg
+    %
+    % globalModelRows cols: training_file, source_training_run_name, model_type,
+    %   K, tau1, tau2, delay, target_dataset_type, target_label,
+    %   global_model_weighted_error, mag_rmse_dB, phase_rmse_deg
+
+    hasData = false;
+
+    figure;
+    hold on; grid on;
+
+    % One curve per local training run
+    if ~isempty(crossValidationRows)
+        trainingRunNames = string(crossValidationRows(:, 2));
+        validationFiles  = string(crossValidationRows(:, 8));
+        weightedErrors   = cell2mat(crossValidationRows(:, 10));
+
+        uniqueRuns = unique(trainingRunNames, "stable");
+
+        for r = 1:numel(uniqueRuns)
+            mask   = trainingRunNames == uniqueRuns(r);
+            amps   = inferAmplitudeFromSourceFile(validationFiles(mask));
+            errors = weightedErrors(mask);
+
+            uniqueAmps = sort(unique(amps(isfinite(amps))));
+            if isempty(uniqueAmps), continue; end
+
+            meanErrors = arrayfun( ...
+                @(a) mean(errors(amps == a), "omitnan") * 100, ...
+                uniqueAmps);
+
+            plot(uniqueAmps, meanErrors, "o-", "LineWidth", 1.4, ...
+                "DisplayName", "Local: " + uniqueRuns(r));
+            hasData = true;
+        end
+    end
+
+    % One curve for global model on validation files
+    if ~isempty(globalModelRows)
+        datasetTypes   = string(globalModelRows(:, 8));
+        targetLabels   = string(globalModelRows(:, 9));
+        weightedErrors = cell2mat(globalModelRows(:, 10));
+
+        mask = datasetTypes == "validation";
+
+        if any(mask)
+            amps   = inferAmplitudeFromRunName(targetLabels(mask));
+            errors = weightedErrors(mask);
+
+            uniqueAmps = sort(unique(amps(isfinite(amps))));
+
+            if ~isempty(uniqueAmps)
+                meanErrors = arrayfun( ...
+                    @(a) mean(errors(amps == a), "omitnan") * 100, ...
+                    uniqueAmps);
+
+                plot(uniqueAmps, meanErrors, "s--", "LineWidth", 2.0, ...
+                    "DisplayName", "Global model");
+                hasData = true;
+            end
+        end
+    end
+
+    if ~hasData
+        close;
+        return;
+    end
+
+    xlabel("PRPS Amplitude (\mus)");
+    ylabel("Normalized RMS Error (%)");
+    ylim([0, 8]);
+    title("Amplitude Generalization Curve", "Interpreter", "none");
+    legend("Location", "best", "Interpreter", "none");
 end
 
 %% General table / utility helpers
