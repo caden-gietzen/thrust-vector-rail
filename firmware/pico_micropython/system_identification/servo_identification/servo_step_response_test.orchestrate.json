@@ -1,0 +1,71 @@
+{
+  "orchestration_version": 1,
+  "description": "Repeated servo step-response test for command-to-angle dynamic identification.",
+  "remote_config_path": "run_config.json",
+  "write_manifest": false,
+
+  "repeat_sequence": {
+    "count": 2
+  },
+
+  "sequence": [
+    {
+      "name": "servo_step_response_test",
+      "script": "servo_step_response_test.py",
+      "config": {
+        "FILENAME": "servo_step_response_test",
+        "SERVO_CENTER_US": 1450,
+        "SERVO_MIN_US": 450,
+        "SERVO_MAX_US": 2450,
+        "SERVO_FREQ_HZ": 50,
+
+        "SAMPLE_PERIOD_MS": 20,
+        "PRE_STEP_HOLD_MS": 800,
+        "POST_STEP_HOLD_MS": 1500,
+        "BETWEEN_STEP_CENTER_HOLD_MS": 800,
+
+        "STATIC_GAIN_DEG_PER_US": -0.091092,
+        "STATIC_INTERCEPT_DEG": 130.329728,
+
+        "STEP_CASES": [
+          {
+            "label": "center_to_pos_10deg",
+            "start_us": 1431,
+            "end_us": 1321,
+            "reps": 3
+          },
+          {
+            "label": "center_to_neg_10deg",
+            "start_us": 1431,
+            "end_us": 1541,
+            "reps": 3
+          },
+          {
+            "label": "center_to_pos_20deg",
+            "start_us": 1431,
+            "end_us": 1211,
+            "reps": 3
+          },
+          {
+            "label": "center_to_neg_20deg",
+            "start_us": 1431,
+            "end_us": 1651,
+            "reps": 3
+          },
+          {
+            "label": "pos_20deg_to_neg_20deg",
+            "start_us": 1211,
+            "end_us": 1651,
+            "reps": 3
+          },
+          {
+            "label": "neg_20deg_to_pos_20deg",
+            "start_us": 1651,
+            "end_us": 1211,
+            "reps": 3
+          }
+        ]
+      }
+    }
+  ]
+}
