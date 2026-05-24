@@ -60,6 +60,76 @@ Detailed requirements and constraints are documented in:
 docs/objectives_requirements_constraints.md
 ```
 
+## Nominal Dynamic Model
+
+The nominal plant model describes the cart as a 1D system driven by a thrust-vectoring actuator pair. This is the working model used for system-identification planning and initial controller design — it is not yet fully validated.
+
+### State vector
+
+$$
+\mathbf{x} = \begin{bmatrix} p \\ v \\ \theta \\ T \end{bmatrix}
+$$
+
+| Symbol | Description | Units |
+|--------|-------------|-------|
+| $p$ | cart position along the rail | m |
+| $v$ | cart velocity along the rail | m/s |
+| $\theta$ | servo / thrust-vector angle | rad |
+| $T$ | total motor thrust magnitude | N |
+
+### Inputs
+
+| Symbol | Description |
+|--------|-------------|
+| $u_\theta$ | commanded servo angle or servo PWM, depending on modeling layer |
+| $u_T$ | commanded thrust or ESC PWM, depending on modeling layer |
+
+### Equations of motion
+
+**Cart kinematics:**
+
+$$
+\dot{p} = v
+$$
+
+**Cart dynamics** (Newton's second law along the rail axis):
+
+$$
+\dot{v} = \frac{T}{m}\sin(\theta) + \frac{f_\text{friction}(p,\, v,\, \theta,\, T)}{m}
+$$
+
+**Servo angle dynamics** (identified first-order lag with transport delay):
+
+$$
+\dot{\theta} = \frac{1}{\tau_\theta}\bigl(\theta_\text{cmd}(t - L_\theta) - \theta\bigr)
+$$
+
+**Thrust dynamics** (structure to be determined from thrust identification):
+
+$$
+\dot{T} = \frac{1}{\tau_T}\bigl(T_\text{cmd}(t - L_T) - T\bigr) \quad \text{(TBD — parameters under identification)}
+$$
+
+| Parameter | Value | Source |
+|-----------|-------|--------|
+| $m$ | cart mass | to be measured |
+| $\tau_\theta$ | 24.4 ms | [PRPS servo identification](experiments/servo_identification/results.md) |
+| $L_\theta$ | 28.8 ms | [PRPS servo identification](experiments/servo_identification/results.md) |
+| $\tau_T$, $L_T$ | — | thrust identification pending |
+| $f_\text{friction}$ | — | friction identification pending |
+
+### Current modeling assumptions
+
+- Motion is modeled along one rail axis only.
+- Servo angle and motor thrust are included as actuator states, not static mappings.
+- Friction is not ignored — it enters as an additive force term $f_\text{friction}$ to be identified from rail experiments.
+- The nominal model retains $\sin(\theta)$ to preserve nonlinear geometry; small-angle linearization may be applied later for LQR or frequency-domain design.
+- Thrust dynamics are not finalized and will be updated after thrust identification is validated.
+
+### Why this matters
+
+This model connects the hardware testbed to flight-controls-style engineering: actuator dynamics, friction/disturbance modeling, frequency-domain system identification, model validation against experimental data, and model-based controller design — all on real hardware with real constraints.
+
 ## Engineering Workflow
 
 The project is organized around a repeatable controls-analysis workflow:
@@ -89,9 +159,9 @@ The project is in the actuator characterization phase, progressing toward closed
 
 The selected servo model is a **first-order lag with transport delay**:
 
-```
-G(s) = (0.001556 / (1 + 0.0244 s)) * exp(-0.0288 s)     [rad/µs]
-```
+$$
+G(s) = \frac{0.001556}{1 + 0.0244\,s}\,e^{-0.0288\,s} \quad [\text{rad}/\mu\text{s}]
+$$
 
 Validation errors on held-out data: ≤ 0.5 dB magnitude, ≤ 2.6° phase. The servo cannot be approximated as an instantaneous actuator — the combined 53 ms lag constrains any rail controller to an initial bandwidth of ≤ 1 Hz.
 
