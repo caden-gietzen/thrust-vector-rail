@@ -190,3 +190,6 @@ cython_debug/
 
 # MATLAB editable figure files
 *.fig
+
+# MATLAB autosave backup files
+*.asv
