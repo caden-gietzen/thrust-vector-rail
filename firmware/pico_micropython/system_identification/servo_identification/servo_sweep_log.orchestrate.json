@@ -1,0 +1,28 @@
+{
+  "orchestration_version": 1,
+  "description": "Repeated static servo PWM sweep for command-to-angle map identification.",
+  "remote_config_path": "run_config.json",
+  "write_manifest": false,
+
+  "repeat_sequence": {
+    "count": 2
+  },
+
+  "sequence": [
+    {
+      "name": "servo_static_pwm_to_angle_sweep",
+      "script": "servo_sweep_log.py",
+      "config": {
+        "FILENAME": "servo_static_pwm_to_angle_sweep",
+        "SERVO_CENTER_US": 1450,
+        "SERVO_MIN_US": 450,
+        "SERVO_MAX_US": 2450,
+        "SERVO_FREQ_HZ": 50,
+
+        "STEP_US": 25,
+        "HOLD_MS": 250,
+        "N_SWEEPS": 2
+      }
+    }
+  ]
+}

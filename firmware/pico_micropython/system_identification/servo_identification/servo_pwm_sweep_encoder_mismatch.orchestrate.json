@@ -1,0 +1,45 @@
+{
+  "orchestration_version": 1,
+  "description": "Servo PWM bidirectional sweep to evaluate encoder mismatch, backlash, repeatability, and return-to-center error.",
+  "remote_config_path": "run_config.json",
+  "write_manifest": false,
+
+  "repeat_sequence": {
+    "count": 1
+  },
+
+  "sequence": [
+    {
+      "name": "servo_pwm_sweep_encoder_mismatch",
+      "script": "servo_pwm_sweep_encoder_mismatch.py",
+      "config": {
+        "TEST_NAME": "servo_pwm_sweep_encoder_mismatch",
+        "SERVO_PIN": 15,
+
+        "CENTER_US": 1450,
+        "MIN_US": 450,
+        "MAX_US": 2450,
+        "PWM_FREQ_HZ": 50,
+
+        "COUNTS_PER_REV": 2400,
+
+        "AMPLITUDES_US": [50, 100, 200, 400, 600],
+        "DWELL_TIMES_MS": [1000, 500, 250, 100, 50],
+        "CYCLES_PER_CASE": 5,
+
+        "INITIAL_CENTER_SETTLE_MS": 1500,
+        "FINAL_CENTER_SETTLE_MS": 500,
+        "INTER_CYCLE_DELAY_MS": 250,
+
+        "EXPORT_FREQUENCY_PLAN": false,
+        "PAUSE_BETWEEN_CASES": false,
+        "PRINT_EVERY_ROW": true,
+
+        "ENCODER_PIN_A": 18,
+        "ENCODER_PIN_B": 19,
+        "ENCODER_MAX_STEP_RATE": 1000000,
+        "ENCODER_DRAIN_HZ": 10000
+      }
+    }
+  ]
+}

@@ -32,9 +32,9 @@ import os
 
 SERVO_PIN = 15
 
-CENTER_US = 1500
-MIN_US = 900
-MAX_US = 2100
+CENTER_US = 1450
+MIN_US = 450
+MAX_US = 2450
 
 PWM_FREQ_HZ = 50
 
@@ -83,6 +83,39 @@ ENCODER_DRAIN_HZ = 10000
 # -----------------------------
 # ENCODER ADAPTER
 # -----------------------------
+
+def load_json_file_if_exists(path):
+    try:
+        import ujson as json
+    except ImportError:
+        import json
+
+    try:
+        with open(path, "r") as f:
+            return json.load(f)
+    except OSError:
+        return None
+
+
+def apply_external_config_if_present():
+    external = load_json_file_if_exists("/run_config.json")
+
+    if external is None:
+        external = load_json_file_if_exists("run_config.json")
+
+    if external is None:
+        return
+
+    if isinstance(external, dict) and "config" in external:
+        external = external["config"]
+
+    if not isinstance(external, dict):
+        raise ValueError("External run config must be a JSON object/dictionary.")
+
+    print("Loaded external run config.")
+
+    for key in external:
+        globals()[key] = external[key]
 
 encoder_backend = None
 
@@ -138,6 +171,11 @@ def encoder_get_count():
 # -----------------------------
 # SERVO HELPERS
 # -----------------------------
+
+apply_external_config_if_present()
+
+if not FILENAME.endswith(".csv"):
+    FILENAME = FILENAME + ".csv"
 
 servo = PWM(Pin(SERVO_PIN))
 servo.freq(PWM_FREQ_HZ)
