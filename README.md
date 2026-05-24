@@ -77,18 +77,29 @@ The project is organized around a repeatable controls-analysis workflow:
 
 ## Current Technical Focus
 
-The current phase focuses on actuator characterization and control-oriented model identification.
+The project is in the actuator characterization phase, progressing toward closed-loop controller implementation.
 
-Work completed or in progress includes:
+**Completed:**
 
-- static thrust mapping across motor command ranges
-- dynamic thrust identification using excitation signals
-- frequency-response analysis
-- transfer-function model fitting
-- model comparison using training and validation datasets
-- actuator bandwidth and delay estimation
-- structured data organization for repeatable analysis
-- preparation for closed-loop controller implementation
+- encoder count-to-angle calibration (2400 counts/rev, <1% endpoint error)
+- static PWM-to-angle mapping for the servo actuator (neutral ~1431 µs, gain −0.00159 rad/µs)
+- servo step-response analysis (~3 Hz bandwidth, no overshoot, mild amplitude dependence)
+- servo PRPS frequency-domain identification over 0.15–3.05 Hz (four amplitudes, training and validation datasets)
+- servo transfer-function model selection and validation
+
+The selected servo model is a **first-order lag with transport delay**:
+
+```
+G(s) = (0.001556 / (1 + 0.0244 s)) * exp(-0.0288 s)     [rad/µs]
+```
+
+Validation errors on held-out data: ≤ 0.5 dB magnitude, ≤ 2.6° phase. The servo cannot be approximated as an instantaneous actuator — the combined 53 ms lag constrains any rail controller to an initial bandwidth of ≤ 1 Hz.
+
+**In progress / next:**
+
+- friction and mechanical resistance identification
+- thrust actuator dynamic characterization
+- closed-loop rail-controller implementation and comparison
 
 ## Candidate Control Methods
 
@@ -153,4 +164,4 @@ Although the testbed is one-dimensional, it supports development of skills relev
 
 ## Current Status
 
-The testbed hardware, data-collection workflow, and initial actuator identification process are in progress. Current work is focused on finalizing validated actuator models and preparing the system for closed-loop controller comparison.
+Servo actuator identification is complete with a validated first-order-plus-delay model. Friction and thrust identification are the next steps before closed-loop controller design. Detailed results and model parameters are documented in `experiments/servo_identification/results.md`.
