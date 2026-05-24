@@ -449,28 +449,13 @@ The selected model is **first-order plus delay** because adding a delay term is 
 
 ## 8. Validation
 
-Validation was presented inline with the model results in Section 6. This section summarizes the conclusions.
+Full validation detail — per-amplitude FRF error tables, model candidate comparisons, and time-domain simulation — is presented in Section 6.
 
-### Frequency-Domain Validation
+**Frequency-domain:** The global model scored against held-out seed-4005 files (one per amplitude, not used in fitting). Worst-case validation errors are 0.5 dB magnitude and 2.6° phase — acceptable for a first-order actuator model.
 
-The global model was scored against held-out seed-4005 files (one per amplitude, not used in fitting):
+**Time-domain:** Simulated with `lsim()` against an independent amp1000 time series (3040-second record, seed 4005). The model tracks the measured servo angle with no systematic bias or drift across the full record.
 
-| Amplitude | Mag RMSE | Phase RMSE |
-|---:|---:|---:|
-| 250 µs  | 0.502 dB | 1.99° |
-| 500 µs  | 0.188 dB | 2.64° |
-| 750 µs  | 0.322 dB | 1.65° |
-| 1000 µs | 0.381 dB | 2.41° |
-
-Validation errors are modestly higher than training errors (as expected), but all remain within practical tolerance for a first-order actuator model. The worst-case magnitude error is 0.5 dB; the worst-case phase error is 2.6°. Both are acceptable for initial controller design.
-
-### Time-Domain Validation
-
-The global model was simulated with `lsim()` against an independent amp1000 time series (seed 4005). The predicted and measured servo angle tracks closely over the full 30-40 second record (see Section 6 time-domain plot). No systematic bias or drift is visible, confirming the model generalizes beyond the training data.
-
-### Conclusion
-
-The global first-order-plus-delay model validates well on held-out data. It is suitable for use in rail-controller design.
+The global first-order-plus-delay model validates well on held-out data and is suitable for rail-controller design.
 
 ---
 
