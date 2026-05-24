@@ -1,0 +1,21 @@
+{
+  "orchestration_version": 1,
+  "description": "Two static thrust sweeps (1000-2000 us, bidirectional) for repeatability.",
+  "remote_config_path": "run_config.json",
+  "write_manifest": false,
+
+  "segments": [
+    {
+      "name": "sweep_01",
+      "config": {
+        "LOG_FILE_BASE": "thrust_sweep_log"
+      }
+    },
+    {
+      "name": "sweep_02",
+      "config": {
+        "LOG_FILE_BASE": "thrust_sweep_log"
+      }
+    }
+  ]
+}
