@@ -1,13 +1,18 @@
-function saveAllFiguresIfEnabled(saveFigures)
-% saveAllFiguresIfEnabled Save all open MATLAB figures to ./figures.
+function saveAllFiguresIfEnabled(saveFigures, plotDir)
+% saveAllFiguresIfEnabled Save all open MATLAB figures to plotDir.
 %
 % Filenames are based on each figure title when available.
+% If plotDir is omitted, saves to a 'figures' subfolder of the current directory.
 
     if ~saveFigures
         return;
     end
 
-    figuresDir = fullfile(pwd, "figures");
+    if nargin < 2 || isempty(plotDir)
+        figuresDir = fullfile(pwd, "figures");
+    else
+        figuresDir = plotDir;
+    end
 
     if ~exist(figuresDir, "dir")
         mkdir(figuresDir);

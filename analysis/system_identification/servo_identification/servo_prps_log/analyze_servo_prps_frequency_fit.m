@@ -1168,8 +1168,7 @@ if SAVE_FIGURES
         mkdir(plotDir);
     end
 
-    cd(plotDir);
-    saveAllFiguresIfEnabled(SAVE_FIGURES);
+    saveAllFiguresIfEnabled(SAVE_FIGURES, plotDir);
 end
 
 %% ============================================================

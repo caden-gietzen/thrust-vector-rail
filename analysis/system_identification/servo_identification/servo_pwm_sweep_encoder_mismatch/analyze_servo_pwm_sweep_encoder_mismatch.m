@@ -20,6 +20,8 @@ clear; clc; close all;
 % User options
 % ============================================================
 
+DATASET_STATUS = "candidate";   % "candidate", "accepted", "rejected", or "diagnostics"
+
 USE_LATEST_CSV = true;
 
 % Used only when USE_LATEST_CSV = false
@@ -38,7 +40,7 @@ SAVE_FIGURES = false;
 
 scriptPath = mfilename("fullpath");
 
-dataDir = getMirroredRawDataDir(scriptPath, "candidate");
+dataDir = getMirroredRawDataDir(scriptPath, DATASET_STATUS);
 plotDir = getMirroredPlotDir(scriptPath);
 
 if USE_LATEST_CSV

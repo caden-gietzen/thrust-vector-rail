@@ -31,9 +31,7 @@
 #       theta_deg = count_delta / 2400 * 360
 #
 # CSV columns:
-#   t_ms,t_s,run_name,segment,servo_us,count,count_delta,theta_rad,theta_deg,
-#   command_delta_us,command_theta_est_rad,command_theta_est_deg,
-#   prbs_state,bit_index,sample_index
+#   t_ms,t_s,run_name,segment,servo_us,command_delta_us,count_delta,theta_rad,sample_index
 #
 # Notes:
 #   PRBS = Pseudo-Random Binary Signal.
@@ -442,8 +440,41 @@ def run_prbs_sequence(
 
 
 # ============================================================
+# External config override
+# ============================================================
+
+def load_json_file_if_exists(path):
+    try:
+        import ujson as json
+    except ImportError:
+        import json
+    try:
+        with open(path, "r") as f:
+            return json.load(f)
+    except OSError:
+        return None
+
+
+def apply_external_config_if_present():
+    external = load_json_file_if_exists("/run_config.json")
+    if external is None:
+        external = load_json_file_if_exists("run_config.json")
+    if external is None:
+        return
+    if isinstance(external, dict) and "config" in external:
+        external = external["config"]
+    if not isinstance(external, dict):
+        raise ValueError("External run config must be a JSON object/dictionary.")
+    print("Loaded external run config.")
+    for key in external:
+        globals()[key] = external[key]
+
+
+# ============================================================
 # Main
 # ============================================================
+
+apply_external_config_if_present()
 
 servo = PWM(Pin(SERVO_PIN))
 servo.freq(SERVO_FREQ_HZ)

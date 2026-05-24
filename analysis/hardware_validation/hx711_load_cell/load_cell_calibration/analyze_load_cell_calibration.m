@@ -284,4 +284,4 @@ fprintf("\nUse in MicroPython:\n");
 fprintf("  SCALE_G_PER_COUNT = %.9f\n", grams_per_count);
 fprintf("  OFFSET_COUNTS = measured tare offset from script\n");
 
-saveAllFiguresIfEnabled(SAVE_FIGURES);
+saveAllFiguresIfEnabled(SAVE_FIGURES, plotDir);

@@ -446,8 +446,4 @@ finally:
     write_pwm_us(servo, SERVO_CENTER_US)
     time.sleep_ms(500)
     servo.deinit()
-
-    if FILENAME is not None:
-        print("Saved:", FILENAME)
-    else:
-        print("No file was created.")
+    print("Done.")

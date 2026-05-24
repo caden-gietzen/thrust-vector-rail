@@ -22,6 +22,8 @@ clear; clc; close all;
 % User options
 % ============================================================
 
+DATASET_STATUS = "candidate";   % "candidate", "accepted", "rejected", or "diagnostics"
+
 USE_LATEST_CSV = true;
 
 % Used only when USE_LATEST_CSV = false
@@ -47,10 +49,8 @@ MAX_DT_ERROR_RATIO           = 0.25;      % median dt can be +/-25%
 
 scriptPath = mfilename("fullpath");
 
-dataDir = getMirroredRawDataDir(scriptPath, "candidate");
+dataDir = getMirroredRawDataDir(scriptPath, DATASET_STATUS);
 plotDir = getMirroredPlotDir(scriptPath);
-
-addpath(genpath(fullfile(findRepoRoot(scriptPath), "analysis", "util")));
 
 csvFiles = dir(fullfile(dataDir, "*.csv"));
 

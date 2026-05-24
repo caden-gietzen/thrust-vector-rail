@@ -45,7 +45,7 @@ COUNTS_PER_REV = 2400.0;
 STATIC_GAIN_DEG_PER_US = -0.091092;
 STATIC_INTERCEPT_DEG = 130.329728;
 
-SERVO_CENTER_US = 1430.75;
+SERVO_CENTER_US = 1430.75;   % calibrated zero-angle intercept from static sweep fit, not the 1450 us command center
 
 % Step metric settings.
 PRE_STEP_TAIL_FRACTION = 0.40;       % last 40% of pre-step hold estimates theta_initial

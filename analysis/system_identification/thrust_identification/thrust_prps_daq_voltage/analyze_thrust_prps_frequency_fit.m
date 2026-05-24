@@ -692,8 +692,7 @@ end
 %% Save figures
 % ============================================================
 
-cd(plotDir);
-saveAllFiguresIfEnabled(SAVE_FIGURES);
+saveAllFiguresIfEnabled(SAVE_FIGURES, plotDir);
 
 %% Local helper functions
 % ============================================================
