@@ -1,4 +1,4 @@
-%% analyze_load_cell_calibration.m
+﻿%% analyze_load_cell_calibration.m
 % Analyze HX711 load cell calibration CSV.
 %
 % Expected CSV columns:
@@ -43,9 +43,7 @@ fprintf("  %s\n", dataPath);
 % Set true if load cell output is negative with positive applied mass.
 flipSign = true;
 
-%% ----------------------------
-% Load data
-% ----------------------------
+%% Load data
 
 T = readtable(dataPath);
 
@@ -66,9 +64,7 @@ end
 
 masses = unique(cal.known_mass_g);
 
-%% ----------------------------
-% Group statistics by mass
-% ----------------------------
+%% Group statistics by mass
 
 meanCounts = zeros(size(masses));
 stdCounts  = zeros(size(masses));
@@ -88,9 +84,7 @@ summaryTable = table(masses, meanCounts, stdCounts, nSamples, ...
 disp("Calibration summary:");
 disp(summaryTable);
 
-%% ----------------------------
-% Linear calibration fit
-% ----------------------------
+%% Linear calibration fit
 % Model:
 %   counts = slope * mass_g + intercept
 
@@ -114,9 +108,7 @@ fprintf("  grams_per_count = %.9f\n", grams_per_count);
 fprintf("  RMSE = %.3f counts\n", rmse_counts);
 fprintf("  RMSE = %.6f g\n", rmse_g);
 
-%% ----------------------------
-% Validation on earlier CSV files
-% ----------------------------
+%% Validation on earlier CSV files
 
 allCsvFiles = dir(fullfile(dataDir, "*.csv"));
 
@@ -213,9 +205,7 @@ else
     end
 end
 
-%% ----------------------------
-% Plot 1: tared counts over time
-% ----------------------------
+%% Plot 1: tared counts over time
 
 figure;
 hold on; grid on;
@@ -226,9 +216,7 @@ xlabel("Time (s)");
 ylabel("Tared count");
 title("HX711 Load Cell Calibration Samples");
 
-%% ----------------------------
-% Plot 2: calibration fit
-% ----------------------------
+%% Plot 2: calibration fit
 
 figure;
 hold on; grid on;
@@ -245,9 +233,7 @@ ylabel("Mean tared count");
 title("Load Cell Calibration Fit");
 legend("Measured mean \pm 1 std", "Linear fit", "Location", "best");
 
-%% ----------------------------
-% Plot 3: residuals
-% ----------------------------
+%% Plot 3: residuals
 
 figure;
 hold on; grid on;
@@ -260,9 +246,7 @@ xlabel("Known mass (g)");
 ylabel("Residual (counts)");
 title("Calibration Fit Residuals");
 
-%% ----------------------------
-% Plot 4: validation error by mass
-% ----------------------------
+%% Plot 4: validation error by mass
 
 if exist("validationTable", "var") && ~isempty(validationTable)
     figure;
@@ -276,9 +260,7 @@ if exist("validationTable", "var") && ~isempty(validationTable)
     title("Validation Error Using Latest Calibration Fit");
 end
 
-%% ----------------------------
-% Optional: print usable MicroPython constants
-% ----------------------------
+%% Optional: print usable MicroPython constants
 
 fprintf("\nUse in MicroPython:\n");
 fprintf("  SCALE_G_PER_COUNT = %.9f\n", grams_per_count);

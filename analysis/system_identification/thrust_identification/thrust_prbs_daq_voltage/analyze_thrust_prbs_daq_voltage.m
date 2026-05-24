@@ -1,4 +1,4 @@
-%% analyze_thrust_prbs_daq_voltage.m
+﻿%% analyze_thrust_prbs_daq_voltage.m
 % Analyze thrust PRBS DAQ files.
 %
 % Expected older CSV columns:
@@ -37,9 +37,7 @@
 
 clear; clc; close all;
 
-%% ----------------------------
-% User options
-% ----------------------------
+%% User options
 
 SAVE_FIGURES = false;
 
@@ -56,9 +54,7 @@ runNames = [
     "local_1700_1850"
 ];
 
-%% ----------------------------
-% Validation options
-% ----------------------------
+%% Validation options
 
 RUN_VALIDATION = true;
 
@@ -66,9 +62,7 @@ RUN_VALIDATION = true;
 % also contain voltage.
 SKIP_VOLTAGE_MODEL_VALIDATION_IF_NO_VOLTAGE = true;
 
-%% ----------------------------
-% Plot toggles
-% ----------------------------
+%% Plot toggles
 
 PLOT_CROSS_RUN_FORCE_OVERLAY      = true;
 PLOT_SEQUENTIAL_THRUST_DRIFT      = true;
@@ -93,9 +87,7 @@ PLOT_SAMPLE_TIME_DIAGNOSTIC       = false;
 
 PLOT_BODE_FIT = true;
 
-%% ----------------------------
-% Identification options
-% ----------------------------
+%% Identification options
 
 USE_VOLTAGE_IF_AVAILABLE = true;
 
@@ -134,9 +126,7 @@ MODEL_SELECTION_MODE = "simplicity_tolerance";
 % Example: 0.01 means within 1 percent of best RMSE.
 SIMPLE_MODEL_RELATIVE_TOLERANCE = 0.01;
 
-%% ----------------------------
-% Locate mirrored folders
-% ----------------------------
+%% Locate mirrored folders
 
 scriptPath = mfilename("fullpath");
 
@@ -193,9 +183,7 @@ end
 
 trainingLabel = makeFileListLabel(trainingCsvFiles);
 
-%% ----------------------------
-% Cross-run overlay for drift / repeatability check
-% ----------------------------
+%% Cross-run overlay for drift / repeatability check
 
 if PLOT_CROSS_RUN_FORCE_OVERLAY
     for r = 1:numel(runNames)
@@ -229,9 +217,7 @@ if PLOT_CROSS_RUN_FORCE_OVERLAY
     end
 end
 
-%% ----------------------------
-% Sequential max-thrust drift analysis
-% ----------------------------
+%% Sequential max-thrust drift analysis
 
 driftRows = [];
 
@@ -301,9 +287,7 @@ else
     fprintf("\nNo drift rows generated.\n");
 end
 
-%% ----------------------------
-% Compute drop relative to first run for each run_name
-% ----------------------------
+%% Compute drop relative to first run for each run_name
 
 if ~isempty(driftTable)
     driftTable.delta_max_from_first_N = zeros(height(driftTable), 1);
@@ -340,9 +324,7 @@ if ~isempty(driftTable)
     }));
 end
 
-%% ----------------------------
-% Plot max thrust drift by run order
-% ----------------------------
+%% Plot max thrust drift by run order
 
 if PLOT_SEQUENTIAL_THRUST_DRIFT && ~isempty(driftTable)
     for r = 1:numel(runNames)
@@ -376,18 +358,14 @@ if PLOT_SEQUENTIAL_THRUST_DRIFT && ~isempty(driftTable)
     end
 end
 
-%% ----------------------------
-% Load combined training data
-% ----------------------------
+%% Load combined training data
 
 Ttrain = readCombinedCsvTables(trainingCsvFiles);
 
 models = struct();
 modelSummaryRows = [];
 
-%% ----------------------------
-% Identify model for each PRBS run
-% ----------------------------
+%% Identify model for each PRBS run
 
 for r = 1:numel(runNames)
     runName = runNames(r);
@@ -629,9 +607,7 @@ else
     fprintf("\nNo training models generated.\n");
 end
 
-%% ----------------------------
-% Validation on remaining CSV files
-% ----------------------------
+%% Validation on remaining CSV files
 
 validationRows = [];
 
@@ -742,15 +718,11 @@ else
     fprintf("\nNo validation results generated.\n");
 end
 
-%% ----------------------------
-% Save figures
-% ----------------------------
+%% Save figures
 
 saveAllFiguresIfEnabled(SAVE_FIGURES, plotDir);
 
-%% ============================================================
-% Local helper functions
-% ============================================================
+%% Local helper functions
 
 function D = getRunData(T, runName, maxBatteryAgeMs)
     idx = strcmp(string(T.run_name), runName) & ...

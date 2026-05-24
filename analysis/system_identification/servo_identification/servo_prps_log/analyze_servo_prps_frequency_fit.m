@@ -1,4 +1,4 @@
-%% analyze_servo_prps_frequency_fit.m
+﻿%% analyze_servo_prps_frequency_fit.m
 % Analyze servo PRPS data from Pico CSV logs using frequency-domain fitting.
 %
 % Supports older compact CSV columns:
@@ -27,9 +27,7 @@
 
 clear; clc; close all;
 
-%% ============================================================
-% User options
-% ============================================================
+%% User options
 
 SAVE_FIGURES = false;
 
@@ -102,9 +100,7 @@ PLOT_GLOBAL_TIME_DOMAIN_BEST_ONLY = true;
 USE_NOMINAL_COMMAND_DT_FOR_FRF = true;
 NOMINAL_COMMAND_DT_S = 0.010;
 
-%% ============================================================
-% Reconstruction settings for Pico CSVs
-% ============================================================
+%% Reconstruction settings for Pico CSVs
 
 COUNTS_PER_REV = 2400.0;
 DEFAULT_SERVO_CENTER_US = 1450;
@@ -121,9 +117,7 @@ SERVO_OUTPUT_SIGN = -1;
 
 DEFAULT_FREQ_LABEL = "0p1_to_3Hz";
 
-%% ============================================================
-% PRPS / frequency extraction options
-% ============================================================
+%% PRPS / frequency extraction options
 
 USE_ONLY_PRPS_SEGMENT = true;
 
@@ -163,9 +157,7 @@ DETREND_EACH_PERIOD = false;
 
 BANDWIDTH_DROP_DB = -3.0;
 
-%% ============================================================
-% Frequency-domain fitting options
-% ============================================================
+%% Frequency-domain fitting options
 
 FIT_FIRST_ORDER                 = true;
 FIT_FIRST_ORDER_DELAY           = true;
@@ -202,18 +194,14 @@ MAX_DELAY_S = 0.50;
 MIN_GAIN_ABS = 1e-5;
 MAX_GAIN_ABS = 0.01;
 
-%% ============================================================
-% Time-domain translation options
-% ============================================================
+%% Time-domain translation options
 
 PLOT_TIME_DOMAIN_TRANSLATION_TRAINING   = true;
 PLOT_TIME_DOMAIN_TRANSLATION_VALIDATION = true;
 
 CENTER_TIME_DOMAIN_SIGNALS = true;
 
-%% ============================================================
-% Plot toggles
-% ============================================================
+%% Plot toggles
 
 PLOT_TRAINING_EMPIRICAL_BODE_WITH_FITS      = false;
 PLOT_VALIDATION_BODE_VS_TRAINING_MODEL      = false;
@@ -229,9 +217,7 @@ PLOT_INPUT_SPECTRUM_DIAGNOSTIC              = false;
 PLOT_PERIOD_OVERLAY_DIAGNOSTIC              = false;
 PLOT_SAMPLE_TIME_DIAGNOSTIC                 = false;
 
-%% ============================================================
-% Locate mirrored folders
-% ============================================================
+%% Locate mirrored folders
 
 scriptPath = mfilename("fullpath");
 
@@ -240,94 +226,138 @@ plotDir = getMirroredPlotDir(scriptPath);
 
 addpath(genpath(fullfile(findRepoRoot(scriptPath), "analysis", "util")));
 
-csvFiles = dir(fullfile(dataDir, "*.csv"));
+trainSubDir = fullfile(dataDir, "training");
+valSubDir   = fullfile(dataDir, "validation");
 
-if isempty(csvFiles)
-    error("No CSV files found in:\n%s", dataDir);
-end
+useSubfolders = isfolder(trainSubDir);
 
-[~, sortIdx] = sort(string({csvFiles.name}));
-csvFiles = csvFiles(sortIdx);
+if useSubfolders
+    fprintf("\nDetected training/ subfolder — using subfolders for train/validation split.\n");
 
-if TRAIN_ON_FIRST_N_FILES
-    nTrain = min(NUM_TRAINING_FILES, numel(csvFiles));
+    trainCsvRaw = dir(fullfile(trainSubDir, "*.csv"));
 
-    trainingCsvFiles = csvFiles(1:nTrain);
+    if isempty(trainCsvRaw)
+        error("training/ subfolder exists but contains no CSV files:\n%s", trainSubDir);
+    end
 
-    firstValidationIdx = nTrain + 1;
+    [~, sortIdx] = sort(string({trainCsvRaw.name}));
+    trainingCsvFiles = trainCsvRaw(sortIdx);
 
-    if firstValidationIdx > numel(csvFiles) || NUM_VALIDATION_FILES == 0
-        validationCsvFiles = csvFiles([]);
-    else
-        if isinf(NUM_VALIDATION_FILES)
-            lastValidationIdx = numel(csvFiles);
+    if isfolder(valSubDir)
+        valCsvRaw = dir(fullfile(valSubDir, "*.csv"));
+
+        if isempty(valCsvRaw)
+            validationCsvFiles = struct([]);
         else
-            lastValidationIdx = min(numel(csvFiles), nTrain + NUM_VALIDATION_FILES);
+            [~, sortIdx] = sort(string({valCsvRaw.name}));
+            validationCsvFiles = valCsvRaw(sortIdx);
         end
-
-        validationCsvFiles = csvFiles(firstValidationIdx:lastValidationIdx);
-    end
-
-    fprintf("\nTraining / identification files:\n");
-    for k = 1:numel(trainingCsvFiles)
-        fprintf("  %s\n", fullfile(trainingCsvFiles(k).folder, trainingCsvFiles(k).name));
-    end
-
-    fprintf("\nValidation files:\n");
-    if isempty(validationCsvFiles)
-        fprintf("  None.\n");
-    else
-        for k = 1:numel(validationCsvFiles)
-            fprintf("  %s\n", fullfile(validationCsvFiles(k).folder, validationCsvFiles(k).name));
-        end
-    end
-else
-    trainingPath = fullfile(dataDir, trainingFile);
-    trainingCsvFiles = dir(trainingPath);
-
-    if isempty(trainingCsvFiles)
-        error("Training file not found:\n%s", trainingPath);
-    end
-
-    if isempty(validationFilesManual)
-        validationCsvFiles = csvFiles(string({csvFiles.name}) ~= string(trainingFile));
     else
         validationCsvFiles = struct([]);
-
-        for k = 1:numel(validationFilesManual)
-            thisValPath = fullfile(dataDir, validationFilesManual(k));
-            thisVal = dir(thisValPath);
-
-            if isempty(thisVal)
-                error("Validation file not found:\n%s", thisValPath);
-            end
-
-            if isempty(validationCsvFiles)
-                validationCsvFiles = thisVal;
-            else
-                validationCsvFiles(end+1) = thisVal;
-            end
-        end
     end
 
-    fprintf("\nTraining / identification file:\n");
-    fprintf("  %s\n", fullfile(trainingCsvFiles(1).folder, trainingCsvFiles(1).name));
+    fprintf("\nTraining / identification files (%s):\n", trainSubDir);
+    for k = 1:numel(trainingCsvFiles)
+        fprintf("  %s\n", trainingCsvFiles(k).name);
+    end
 
-    fprintf("\nValidation files:\n");
+    fprintf("\nValidation files (%s):\n", valSubDir);
     if isempty(validationCsvFiles)
         fprintf("  None.\n");
     else
         for k = 1:numel(validationCsvFiles)
-            fprintf("  %s\n", fullfile(validationCsvFiles(k).folder, validationCsvFiles(k).name));
+            fprintf("  %s\n", validationCsvFiles(k).name);
+        end
+    end
+
+else
+    csvFiles = dir(fullfile(dataDir, "*.csv"));
+
+    if isempty(csvFiles)
+        error("No CSV files found in:\n%s", dataDir);
+    end
+
+    [~, sortIdx] = sort(string({csvFiles.name}));
+    csvFiles = csvFiles(sortIdx);
+
+    if TRAIN_ON_FIRST_N_FILES
+        nTrain = min(NUM_TRAINING_FILES, numel(csvFiles));
+
+        trainingCsvFiles = csvFiles(1:nTrain);
+
+        firstValidationIdx = nTrain + 1;
+
+        if firstValidationIdx > numel(csvFiles) || NUM_VALIDATION_FILES == 0
+            validationCsvFiles = csvFiles([]);
+        else
+            if isinf(NUM_VALIDATION_FILES)
+                lastValidationIdx = numel(csvFiles);
+            else
+                lastValidationIdx = min(numel(csvFiles), nTrain + NUM_VALIDATION_FILES);
+            end
+
+            validationCsvFiles = csvFiles(firstValidationIdx:lastValidationIdx);
+        end
+
+        fprintf("\nTraining / identification files:\n");
+        for k = 1:numel(trainingCsvFiles)
+            fprintf("  %s\n", fullfile(trainingCsvFiles(k).folder, trainingCsvFiles(k).name));
+        end
+
+        fprintf("\nValidation files:\n");
+        if isempty(validationCsvFiles)
+            fprintf("  None.\n");
+        else
+            for k = 1:numel(validationCsvFiles)
+                fprintf("  %s\n", fullfile(validationCsvFiles(k).folder, validationCsvFiles(k).name));
+            end
+        end
+    else
+        trainingPath = fullfile(dataDir, trainingFile);
+        trainingCsvFiles = dir(trainingPath);
+
+        if isempty(trainingCsvFiles)
+            error("Training file not found:\n%s", trainingPath);
+        end
+
+        if isempty(validationFilesManual)
+            validationCsvFiles = csvFiles(string({csvFiles.name}) ~= string(trainingFile));
+        else
+            validationCsvFiles = struct([]);
+
+            for k = 1:numel(validationFilesManual)
+                thisValPath = fullfile(dataDir, validationFilesManual(k));
+                thisVal = dir(thisValPath);
+
+                if isempty(thisVal)
+                    error("Validation file not found:\n%s", thisValPath);
+                end
+
+                if isempty(validationCsvFiles)
+                    validationCsvFiles = thisVal;
+                else
+                    validationCsvFiles(end+1) = thisVal;
+                end
+            end
+        end
+
+        fprintf("\nTraining / identification file:\n");
+        fprintf("  %s\n", fullfile(trainingCsvFiles(1).folder, trainingCsvFiles(1).name));
+
+        fprintf("\nValidation files:\n");
+        if isempty(validationCsvFiles)
+            fprintf("  None.\n");
+        else
+            for k = 1:numel(validationCsvFiles)
+                fprintf("  %s\n", fullfile(validationCsvFiles(k).folder, validationCsvFiles(k).name));
+            end
         end
     end
 end
 
 trainingLabel = makeFileListLabel(trainingCsvFiles);
 
-%% ============================================================
-% Load combined tables and normalize formats
-% ============================================================
+%% Load combined tables and normalize formats
 
 Ttrain = readCombinedCsvTables(trainingCsvFiles);
 
@@ -375,9 +405,7 @@ if ~isempty(Tval)
     end
 end
 
-%% ============================================================
-% Main frequency-domain identification loop
-% ============================================================
+%% Main frequency-domain identification loop
 
 allSummaryRows = cell(0, 16);
 bestModels = struct();
@@ -629,11 +657,7 @@ for r = 1:numel(runNames)
         plotSampleTimeDiagnostic(Dtrain, runName, "training");
     end
 
-    %% ------------------------------------------------------------
-    % Cross-amplitude validation: apply this training-fitted model to
-    % every validation CSV file, regardless of validation run_name.
-    % This answers: how far does the amp100 model generalize as amplitude grows?
-    % ------------------------------------------------------------
+    %% Cross-amplitude validation: apply this training-fitted model to
 
     if VALIDATE_MODEL_ON_ALL_VALIDATION_FILES && ~isempty(Tval)
         validationSourceFiles = unique(string(Tval.source_file), "stable");
@@ -719,9 +743,7 @@ for r = 1:numel(runNames)
 
 end
 
-%% ============================================================
-% Local model generalization across all training runs/amplitudes
-% ============================================================
+%% Local model generalization across all training runs/amplitudes
 
 if SCORE_LOCAL_MODELS_ON_ALL_TRAINING_RUNS && ~isempty(fieldnames(bestModels))
     fprintf("\n============================================================\n");
@@ -776,9 +798,7 @@ if SCORE_LOCAL_MODELS_ON_ALL_TRAINING_RUNS && ~isempty(fieldnames(bestModels))
     end
 end
 
-%% ============================================================
-% Global pooled model across all training amplitudes
-% ============================================================
+%% Global pooled model across all training amplitudes
 
 globalBestModel = [];
 globalCandidateModels = [];
@@ -1022,9 +1042,7 @@ if FIT_GLOBAL_MODEL_ON_ALL_TRAINING_RUNS && ~isempty(fieldnames(trainingFrfs))
     end
 end
 
-%% ============================================================
-% Summary table
-% ============================================================
+%% Summary table
 
 if ~isempty(allSummaryRows)
     summaryVariableNames = { ...
@@ -1159,9 +1177,7 @@ else
     fprintf("\nNo global model per-dataset results generated.\n");
 end
 
-%% ============================================================
-% Save figures
-% ============================================================
+%% Save figures
 
 if SAVE_FIGURES
     if ~exist(plotDir, "dir")
@@ -1171,9 +1187,7 @@ if SAVE_FIGURES
     saveAllFiguresIfEnabled(SAVE_FIGURES, plotDir);
 end
 
-%% ============================================================
-% Local helper functions
-% ============================================================
+%% Local helper functions
 
 function T = normalizeServoPrpsTable(T, countsPerRev, defaultServoCenterUs, defaultFreqLabel, servoOutputSign)
     vars = string(T.Properties.VariableNames);
@@ -2345,9 +2359,7 @@ function globalFrf = combineFrfsFromStruct(frfStruct, globalName)
     fprintf("  Median coherence: %.3f\n", median(globalFrf.coherence, "omitnan"));
 end
 
-%% ============================================================
-% Plotting functions
-% ============================================================
+%% Plotting functions
 
 function plotEmpiricalBodeWithFits(frf, models, bestModel, runName, datasetLabel, minCoherence, plotRejected, bandwidthHz)
     f = frf.f_Hz(:);
@@ -2769,9 +2781,7 @@ function plotSampleTimeDiagnostic(D, runName, datasetLabel)
         "Interpreter", "none");
 end
 
-%% ============================================================
-% General table / utility helpers
-% ============================================================
+%% General table / utility helpers
 
 function T = readCombinedCsvTables(csvFileStruct)
     tables = cell(numel(csvFileStruct), 1);

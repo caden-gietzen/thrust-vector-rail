@@ -1,4 +1,4 @@
-%% validate_servo_prps_data.m
+﻿%% validate_servo_prps_data.m
 % Validate servo PRPS encoder data before frequency-domain identification.
 %
 % Purpose:
@@ -18,9 +18,7 @@
 
 clear; clc; close all;
 
-%% ============================================================
-% User options
-% ============================================================
+%% User options
 
 DATASET_STATUS = "candidate";   % "candidate", "accepted", "rejected", or "diagnostics"
 
@@ -43,9 +41,7 @@ MAX_SAMPLE_DT_JITTER_RATIO   = 0.35;      % std(dt)/median(dt)
 EXPECTED_DT_S                = 0.010;     % 10 ms command/update period
 MAX_DT_ERROR_RATIO           = 0.25;      % median dt can be +/-25%
 
-%% ============================================================
-% Locate mirrored folders
-% ============================================================
+%% Locate mirrored folders
 
 scriptPath = mfilename("fullpath");
 
@@ -70,9 +66,7 @@ dataPath = fullfile(dataDir, dataFile);
 fprintf("\nValidating servo PRPS file:\n");
 fprintf("  %s\n", dataPath);
 
-%% ============================================================
-% Load and normalize
-% ============================================================
+%% Load and normalize
 
 T = readtable(dataPath);
 
@@ -94,9 +88,7 @@ for k = 1:numel(requiredVars)
     end
 end
 
-%% ============================================================
-% Basic signal extraction
-% ============================================================
+%% Basic signal extraction
 
 t = T.t_s;
 servo_us = T.servo_us;
@@ -127,9 +119,7 @@ theta_rad = Tvalid.theta_rad;
 theta_deg = Tvalid.theta_deg;
 segment = string(Tvalid.segment);
 
-%% ============================================================
-% Check 1: sample timing
-% ============================================================
+%% Check 1: sample timing
 
 dt = diff(t);
 dt = dt(isfinite(dt) & dt > 0);
@@ -145,18 +135,14 @@ dtErrorRatio = abs(medianDt - EXPECTED_DT_S) / EXPECTED_DT_S;
 passTiming = dtJitterRatio <= MAX_SAMPLE_DT_JITTER_RATIO && ...
              dtErrorRatio <= MAX_DT_ERROR_RATIO;
 
-%% ============================================================
-% Check 2: global angle sanity
-% ============================================================
+%% Check 2: global angle sanity
 
 maxAbsThetaDeg = max(abs(theta_deg), [], "omitnan");
 thetaRangeDeg = max(theta_deg, [], "omitnan") - min(theta_deg, [], "omitnan");
 
 passAngleBound = maxAbsThetaDeg <= MAX_REASONABLE_ABS_THETA_DEG;
 
-%% ============================================================
-% Check 3: baseline / settle behavior
-% ============================================================
+%% Check 3: baseline / settle behavior
 
 baselineMask = contains(lower(segment), "baseline") | ...
                contains(lower(segment), "settle");
@@ -173,9 +159,7 @@ end
 passBaseline = ~any(baselineMask) || ...
                maxBaselineAbsThetaDeg <= MAX_BASELINE_ABS_THETA_DEG;
 
-%% ============================================================
-% Check 4: center-command behavior
-% ============================================================
+%% Check 4: center-command behavior
 
 centerMask = abs(servo_us - DEFAULT_SERVO_CENTER_US) <= MAX_CENTER_CMD_ERROR_US;
 
@@ -193,9 +177,7 @@ end
 passCenter = ~any(centerMask) || ...
              maxCenterAbsThetaDeg <= MAX_CENTER_ABS_THETA_DEG;
 
-%% ============================================================
-% Check 5: command sanity
-% ============================================================
+%% Check 5: command sanity
 
 minServoUs = min(servo_us, [], "omitnan");
 maxServoUs = max(servo_us, [], "omitnan");
@@ -203,9 +185,7 @@ maxAbsCommandDeltaUs = max(abs(command_delta_us), [], "omitnan");
 
 passCommandFinite = all(isfinite(servo_us)) && all(isfinite(command_delta_us));
 
-%% ============================================================
-% Optional per-period drift check
-% ============================================================
+%% Optional per-period drift check
 
 hasPeriodIndex = ismember("period_index", string(Tvalid.Properties.VariableNames));
 
@@ -243,9 +223,7 @@ if hasPeriodIndex
     );
 end
 
-%% ============================================================
-% Print validation summary
-% ============================================================
+%% Print validation summary
 
 overallPass = passTiming && ...
               passAngleBound && ...
@@ -322,9 +300,7 @@ else
     fprintf("  Data is reasonable enough to proceed to frequency-domain fitting.\n");
 end
 
-%% ============================================================
-% Plots
-% ============================================================
+%% Plots
 
 figure("Name", "Servo PRPS Validation - Command and Angle");
 yyaxis left;
@@ -380,9 +356,7 @@ if ~isempty(periodDriftTable)
     title("Per-Period Angle Drift");
 end
 
-%% ============================================================
-% Save figures
-% ============================================================
+%% Save figures
 
 if SAVE_FIGURES
     if ~exist(plotDir, "dir")
@@ -407,9 +381,7 @@ if SAVE_FIGURES
     fprintf("\nSaved validation figures to:\n  %s\n", plotDir);
 end
 
-%% ============================================================
-% Local functions
-% ============================================================
+%% Local functions
 
 function T = normalizeServoPrpsValidationTable(T, countsPerRev, defaultServoCenterUs)
     vars = string(T.Properties.VariableNames);

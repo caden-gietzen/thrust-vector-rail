@@ -1,4 +1,4 @@
-%% analyze_thrust_prbs_daq_no_voltage.m
+﻿%% analyze_thrust_prbs_daq_no_voltage.m
 % Analyze thrust PRBS DAQ files.
 %
 % Expected CSV columns:
@@ -6,9 +6,7 @@
 
 clear; clc; close all;
 
-%% ----------------------------
-% User options
-% ----------------------------
+%% User options
 
 USE_LATEST_CSV = true;
 SAVE_FIGURES = true;
@@ -22,9 +20,7 @@ runNames = [
     "local_1700_1850"
 ];
 
-%% ----------------------------
-% Locate mirrored folders
-% ----------------------------
+%% Locate mirrored folders
 
 scriptPath = mfilename("fullpath");
 
@@ -47,9 +43,7 @@ trainingPath = fullfile(dataDir, trainingFile);
 
 fprintf("\nTraining / identification file:\n  %s\n", trainingPath);
 
-%% ----------------------------
-% Cross-run overlay for drift / repeatability check
-% ----------------------------
+%% Cross-run overlay for drift / repeatability check
 
 for r = 1:numel(runNames)
     runName = runNames(r);
@@ -82,9 +76,7 @@ for r = 1:numel(runNames)
     legend("Location", "best", "Interpreter", "none");
 end
 
-%% ----------------------------
-% Sequential max-thrust drift analysis
-% ----------------------------
+%% Sequential max-thrust drift analysis
 
 driftRows = [];
 
@@ -138,9 +130,7 @@ driftTable = cell2table(driftRows, ...
 disp("Sequential thrust drift summary:");
 disp(driftTable);
 
-%% ----------------------------
-% Compute drop relative to first run for each run_name
-% ----------------------------
+%% Compute drop relative to first run for each run_name
 
 driftTable.delta_max_from_first_N = zeros(height(driftTable), 1);
 driftTable.percent_max_from_first = zeros(height(driftTable), 1);
@@ -173,9 +163,7 @@ disp(driftTable(:, { ...
     'percent_max_from_first' ...
 }));
 
-%% ----------------------------
-% Plot max thrust drift by run order
-% ----------------------------
+%% Plot max thrust drift by run order
 
 for r = 1:numel(runNames)
     runName = runNames(r);
@@ -202,17 +190,13 @@ for r = 1:numel(runNames)
     legend("Location", "best");
 end
 
-%% ----------------------------
-% Load training data
-% ----------------------------
+%% Load training data
 
 Ttrain = readtable(trainingPath);
 
 models = struct();
 
-%% ----------------------------
-% Identify model for each PRBS run
-% ----------------------------
+%% Identify model for each PRBS run
 
 for r = 1:numel(runNames)
     runName = runNames(r);
@@ -259,9 +243,7 @@ for r = 1:numel(runNames)
     title("PRBS Input - " + runName, "Interpreter", "none");
 end
 
-%% ----------------------------
-% Validation on earlier CSV files
-% ----------------------------
+%% Validation on earlier CSV files
 
 validationRows = [];
 
@@ -335,15 +317,11 @@ else
     fprintf("\nNo validation files found besides training file.\n");
 end
 
-%% ----------------------------
-% Save figures
-% ----------------------------
+%% Save figures
 
 saveAllFiguresIfEnabled(SAVE_FIGURES, plotDir);
 
-%% ============================================================
-% Local helper functions
-% ============================================================
+%% Local helper functions
 
 function D = getRunData(T, runName)
     idx = strcmp(string(T.run_name), runName) & ...

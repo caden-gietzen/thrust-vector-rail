@@ -1,4 +1,4 @@
-%% analyze_servo_pwm_sweep_encoder_mismatch.m
+﻿%% analyze_servo_pwm_sweep_encoder_mismatch.m
 % Analyze bidirectional servo PWM sweep encoder mismatch data.
 %
 % Expected CSV from:
@@ -16,9 +16,7 @@
 
 clear; clc; close all;
 
-%% ============================================================
-% User options
-% ============================================================
+%% User options
 
 DATASET_STATUS = "candidate";   % "candidate", "accepted", "rejected", or "diagnostics"
 
@@ -34,9 +32,7 @@ ACCEPTABLE_MISMATCH_COUNTS = 5;
 
 SAVE_FIGURES = false;
 
-%% ============================================================
-% Locate project paths
-% ============================================================
+%% Locate project paths
 
 scriptPath = mfilename("fullpath");
 
@@ -58,9 +54,7 @@ dataPath = fullfile(dataDir, dataFile);
 fprintf("\nUsing data file:\n");
 fprintf("  %s\n", dataPath);
 
-%% ============================================================
-% Load data
-% ============================================================
+%% Load data
 
 T = readtable(dataPath);
 
@@ -94,9 +88,7 @@ else
     hasApproxFrequency = false;
 end
 
-%% ============================================================
-% Summary table
-% ============================================================
+%% Summary table
 
 G = groupsummary( ...
     T, ...
@@ -139,9 +131,7 @@ disp(" ");
 disp("Grouped mismatch summary:");
 disp(G);
 
-%% ============================================================
-% Pivot matrices
-% ============================================================
+%% Pivot matrices
 
 ampVals = sort(unique(T.amplitude_us), "ascend");
 dwellVals = sort(unique(T.dwell_ms), "descend");
@@ -151,9 +141,7 @@ meanAbsMismatch = makePivot(G, ampVals, dwellVals, "mean_abs_mismatch_counts");
 rmsMismatch = makePivot(G, ampVals, dwellVals, "rms_abs_mismatch_counts");
 maxAbsMismatch = makePivot(G, ampVals, dwellVals, "max_abs_mismatch_counts");
 
-%% ============================================================
-% Plots
-% ============================================================
+%% Plots
 
 figure("Name", "Mean Final Count Mismatch");
 heatmap(ampVals, dwellVals, meanMismatch);
@@ -257,9 +245,7 @@ for d = 1:numel(dwellVals)
     end
 end
 
-%% ============================================================
-% Stroke delta plots
-% ============================================================
+%% Stroke delta plots
 
 strokeSummary = groupsummary( ...
     T, ...
@@ -310,9 +296,7 @@ ylabel("Return Stroke Delta (counts)");
 title("Mean Return-to-Center Stroke Delta");
 legend("Location", "best");
 
-%% ============================================================
-% Pass/fail map
-% ============================================================
+%% Pass/fail map
 
 passMap = maxAbsMismatch <= ACCEPTABLE_MISMATCH_COUNTS;
 
@@ -322,9 +306,7 @@ xlabel("Amplitude (\mus)");
 ylabel("Dwell Time (ms)");
 title(sprintf("Pass/Fail Map: Max Abs Mismatch <= %d counts", ACCEPTABLE_MISMATCH_COUNTS));
 
-%% ============================================================
-% Optional approximate command-cycle plot
-% ============================================================
+%% Optional approximate command-cycle plot
 
 if hasApproxFrequency
     figure("Name", "Mismatch vs Approx Command Cycle Frequency");
@@ -348,9 +330,7 @@ if hasApproxFrequency
     legend("Location", "best");
 end
 
-%% ============================================================
-% Print summary
-% ============================================================
+%% Print summary
 
 Gw = sortrows(G, "max_abs_mismatch_counts", "descend");
 
@@ -394,9 +374,7 @@ fprintf("  If low dwell-time cases show poor endpoint motion but low final misma
 fprintf("  that likely indicates servo attenuation rather than encoder failure.\n");
 fprintf("  Treat very short dwell times as actuator bandwidth tests, not clean encoder tests.\n");
 
-%% ============================================================
-% Save figures
-% ============================================================
+%% Save figures
 
 if SAVE_FIGURES
     if ~exist(plotDir, "dir")
@@ -421,9 +399,7 @@ if SAVE_FIGURES
     fprintf("\nSaved figures to:\n  %s\n", plotDir);
 end
 
-%% ============================================================
-% Local functions
-% ============================================================
+%% Local functions
 
 function M = makePivot(G, ampVals, dwellVals, metricName)
     M = nan(numel(dwellVals), numel(ampVals));

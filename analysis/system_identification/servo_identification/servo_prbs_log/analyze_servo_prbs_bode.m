@@ -1,4 +1,4 @@
-%% analyze_servo_prbs_bode.m
+﻿%% analyze_servo_prbs_bode.m
 % Analyze servo PRBS data from Pico CSV log.
 %
 % Goals:
@@ -28,9 +28,7 @@
 
 clear; clc; close all;
 
-%% ============================================================
-% User options
-% ============================================================
+%% User options
 
 DATASET_STATUS = "candidate";   % "candidate", "accepted", "rejected", or "diagnostics"
 
@@ -93,9 +91,7 @@ MAX_GAIN_ABS = 0.01;
 RATE_LIMIT_PERCENTILE = 95;
 RATE_LIMIT_FLATNESS_THRESHOLD = 0.30;
 
-%% ============================================================
-% Locate project paths
-% ============================================================
+%% Locate project paths
 
 scriptPath = mfilename("fullpath");
 
@@ -117,9 +113,7 @@ dataPath = fullfile(dataDir, dataFile);
 fprintf("\nUsing data file:\n");
 fprintf("  %s\n", dataPath);
 
-%% ============================================================
-% Load data
-% ============================================================
+%% Load data
 
 T = readtable(dataPath);
 
@@ -150,9 +144,7 @@ for k = 1:numel(runNames)
     fprintf("  %s\n", runNames(k));
 end
 
-%% ============================================================
-% Main loop
-% ============================================================
+%% Main loop
 
 summaryRows = cell(0, 14);
 
@@ -212,9 +204,7 @@ for r = 1:numel(runNames)
     u0 = uUniform - mean(uUniform, "omitnan");
     y0 = yUniform - mean(yUniform, "omitnan");
 
-    %% ========================================================
-    % Empirical FRF estimate using windowed cross spectra
-    % ========================================================
+    %% Empirical FRF estimate using windowed cross spectra
 
     windowLengthSamples = max(32, round(WINDOW_LENGTH_S / dt));
     windowLengthSamples = min(windowLengthSamples, numel(u0));
@@ -251,9 +241,7 @@ for r = 1:numel(runNames)
         warning("Fewer than 3 good FRF points for %s. Fit may be unreliable.", runName);
     end
 
-    %% ========================================================
-    % Approximate bandwidth
-    % ========================================================
+    %% Approximate bandwidth
 
     lowFreqMask = validFreq & inputStrong & coherence >= MIN_COHERENCE_FOR_FIT;
 
@@ -282,9 +270,7 @@ for r = 1:numel(runNames)
         bandwidthHz = NaN;
     end
 
-    %% ========================================================
-    % Approximate delay from phase slope
-    % ========================================================
+    %% Approximate delay from phase slope
 
     % Delay contributes phase:
     %
@@ -314,9 +300,7 @@ for r = 1:numel(runNames)
         delayApproxS = NaN;
     end
 
-    %% ========================================================
-    % Fit simple models
-    % ========================================================
+    %% Fit simple models
 
     models = struct([]);
 
@@ -367,9 +351,7 @@ for r = 1:numel(runNames)
         bestModel.weighted_error = NaN;
     end
 
-    %% ========================================================
-    % Rate-limit diagnostic
-    % ========================================================
+    %% Rate-limit diagnostic
 
     dy = gradient(yDegUniform, dt); % deg/s
 
@@ -388,9 +370,7 @@ for r = 1:numel(runNames)
 
     likelyRateLimited = nearRateLimitFraction > RATE_LIMIT_FLATNESS_THRESHOLD;
 
-    %% ========================================================
-    % Recommend PRPS frequency range
-    % ========================================================
+    %% Recommend PRPS frequency range
 
     % Conservative recommendation:
     %   lower bound: low enough to capture quasi-static gain
@@ -415,9 +395,7 @@ for r = 1:numel(runNames)
         prpsMaxHz = max(prpsMaxHz, 1.0);
     end
 
-    %% ========================================================
-    % Minimal plots
-    % ========================================================
+    %% Minimal plots
 
     % Plot 1: time-domain command and measured angle
     figure;
@@ -477,9 +455,7 @@ for r = 1:numel(runNames)
     ylabel("Angular Velocity (deg/s)");
     title("Rate-Limit Diagnostic - " + runName);
 
-    %% ========================================================
-    % Print summary
-    % ========================================================
+    %% Print summary
 
     fprintf("\nRun summary: %s\n", runName);
     fprintf("  Samples used: %d\n", numel(tUniform));
@@ -551,9 +527,7 @@ for r = 1:numel(runNames)
     }];
 end
 
-%% ============================================================
-% Summary table
-% ============================================================
+%% Summary table
 
 if ~isempty(summaryRows)
 
@@ -583,9 +557,7 @@ if ~isempty(summaryRows)
     disp(summaryTable);
 end
 
-%% ============================================================
-% Save figures
-% ============================================================
+%% Save figures
 
 if SAVE_FIGURES
     if ~exist(plotDir, "dir")
@@ -597,9 +569,7 @@ if SAVE_FIGURES
     fprintf("\nSaved figures to:\n  %s\n", plotDir);
 end
 
-%% ============================================================
-% Local helper functions
-% ============================================================
+%% Local helper functions
 
 function [G, fHz, coherence, Suu] = estimateWindowedFrf(u, y, Fs, windowLengthSamples, stepSamples)
     u = u(:);
