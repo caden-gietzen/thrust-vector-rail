@@ -4,7 +4,20 @@
 
 The thrust actuator is being characterized using a static PWM-to-thrust sweep and planned PRPS dynamic identification. The goal is to determine a low-order model mapping ESC command to thrust force suitable for initial rail-controller design.
 
-**Current status: static sweep and PRPS dynamic identification complete. Global first-order-plus-delay model selected for initial controller design.**
+**Current status: static sweep and PRPS dynamic identification complete.**
+
+**Final model for initial controller design and friction testing:**
+
+$$\boxed{G_{thrust}(s) = \frac{0.00414}{\,0.0781\,s + 1\,} \cdot e^{-0.0252 s} \quad \left[\frac{\text{N}}{\mu\text{s}}\right]}$$
+
+| Parameter | Value |
+|---|---:|
+| $K$ | 0.00414 N/µs |
+| $\tau_1$ | 78.1 ms |
+| $L$ (delay) | 25.2 ms |
+| Dominant bandwidth | 2.04 Hz (12.8 rad/s) |
+
+This is the **global first-order-plus-delay** fit over the full usable operating range (1100–1950 µs). It is used as the thrust plant model for: (1) initial rail-controller PID design, and (2) friction identification experiments (where thrust is an input and friction force is the target output). See Sections 4–5 for identification details and controller-design implications.
 
 Initial conclusions from the static sweep:
 
