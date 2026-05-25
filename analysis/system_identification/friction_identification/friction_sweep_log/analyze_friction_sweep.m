@@ -29,11 +29,13 @@
 %   Friction model: F_friction = b*xdot + mu*sign(xdot)   [N·s/m, N]
 %   Stiction:       F_stiction = F_thrust_breakaway * sin(theta_fixed)   [N]
 
+close all; clear; clc
+
 % =========================================================
 %  USER-EDITABLE PARAMETERS
 % =========================================================
 
-SAVE_FIGURES = false;
+SAVE_FIGURES = true;
 
 % --- Vehicle mass ---
 M_kg       = 0.4536;    % 1 lb nominal — re-weigh before test and update
@@ -78,7 +80,7 @@ figNum = 0;
 % =========================================================
 
 % Try accepted first; fall back to candidate.
-dataDir = getMirroredRawDataDir(scriptPath, 'accepted');
+dataDir = getMirroredRawDataDir(scriptPath, 'diagnostics');
 if ~isfolder(dataDir) || isempty(dir(fullfile(dataDir, '*.csv')))
     fprintf('No accepted data found. Trying candidate...\n');
     dataDir = getMirroredRawDataDir(scriptPath, 'candidate');
@@ -142,9 +144,7 @@ for k = 1:numel(csvFiles)
     fprintf('Run %2d: servo=%4d us  esc=%4d us  angle=%+.1f deg  halt=%s\n', ...
         nRuns, round(runs(nRuns).servo_us), round(runs(nRuns).esc_us), ...
         runs(nRuns).theta_cmd_deg, ...
-        string(hasStiction)*'stiction' + string(~hasStiction && hasEndstop)*'endstop' + ...
-        string(~hasStiction && ~hasEndstop && hasTimeout)*'timeout' + ...
-        string(~hasStiction && ~hasEndstop && ~hasTimeout)*'unclear');
+        haltLabel(hasStiction, hasEndstop, hasTimeout));
 end
 
 if nRuns == 0
@@ -189,7 +189,7 @@ for k = 1:nRuns
     fprintf('%+7.1f°  %7d   %13.4f   %13.4f   %s\n', ...
         runs(k).theta_cmd_deg, round(runs(k).esc_us), ...
         F_thrust_ss, F_rail_ss, ...
-        string(runs(k).is_motion)*'YES' + string(~runs(k).is_motion)*'no (stiction)');
+        motionLabel(runs(k).is_motion));
 end
 
 % For each angle direction, find the stiction bracket.
@@ -252,11 +252,14 @@ for k = 1:nRuns
     x_m = double(cnt) / C_m;
 
     % Uniform time vector for lsim and SG filter
+    % (raw timestamps have jitter; lsim requires exactly uniform spacing)
     dt = median(diff(t_s));
     if dt <= 0 || dt > 0.1
         fprintf('Run %d: unexpected dt = %.4f s, skipping.\n', k, dt);
         continue;
     end
+    N_samp  = length(t_s);
+    t_lsim  = (0:N_samp-1)' * dt;   % uniform grid anchored at 0
 
     % Savitzky-Golay filter then differentiate
     win_n = round(SG_WINDOW_S / dt);
@@ -269,11 +272,11 @@ for k = 1:nRuns
 
     % Predict servo angle via lsim
     u_servo_dev = double(sv_us) - u_neutral;   % deviation from neutral (µs)
-    theta_rad   = lsim(G_servo, u_servo_dev, t_s);
+    theta_rad   = lsim(G_servo, u_servo_dev, t_lsim);
 
     % Predict thrust via lsim (zero below dead zone)
     u_thrust_dev = max(0, double(ec_us) - u_T_min);
-    F_thrust     = lsim(G_thrust, u_thrust_dev, t_s);
+    F_thrust     = lsim(G_thrust, u_thrust_dev, t_lsim);
     F_thrust     = max(0, F_thrust);   % clamp negative Padé artefacts
 
     % Rail-direction force and friction residual
@@ -575,4 +578,28 @@ grid on;
 
 if SAVE_FIGURES
     saveAllFiguresIfEnabled(true, plotDir);
+end
+
+% =========================================================
+%  LOCAL FUNCTIONS
+% =========================================================
+
+function label = motionLabel(isMotion)
+    if isMotion
+        label = 'YES';
+    else
+        label = 'no (stiction)';
+    end
+end
+
+function label = haltLabel(hasStiction, hasEndstop, hasTimeout)
+    if hasStiction
+        label = 'stiction';
+    elseif hasEndstop
+        label = 'endstop';
+    elseif hasTimeout
+        label = 'timeout';
+    else
+        label = 'unclear';
+    end
 end

@@ -1,11 +1,11 @@
 {
   "orchestration_version": 1,
-  "description": "Friction sweep: 3 ESC commands separated by 50 us, 2 passes each. Edit the 3 ESC_COMMAND_US values between batches to step through the full thrust range.",
+  "description": "Friction sweep: ESC commands 1100–1950 us in 50 us steps, positive and negative 20 deg, single pass.",
   "remote_config_path": "run_config.json",
   "write_manifest": false,
 
   "repeat_sequence": {
-    "count": 2
+    "count": 1
   },
 
   "sequence": [
@@ -14,6 +14,36 @@
     {"name": "pos20_esc1150", "config": {"LOG_FILE_BASE": "friction_sweep_log", "SERVO_ANGLE_DEG":  20.0, "ESC_COMMAND_US": 1150}},
     {"name": "neg20_esc1150", "config": {"LOG_FILE_BASE": "friction_sweep_log", "SERVO_ANGLE_DEG": -20.0, "ESC_COMMAND_US": 1150}},
     {"name": "pos20_esc1200", "config": {"LOG_FILE_BASE": "friction_sweep_log", "SERVO_ANGLE_DEG":  20.0, "ESC_COMMAND_US": 1200}},
-    {"name": "neg20_esc1200", "config": {"LOG_FILE_BASE": "friction_sweep_log", "SERVO_ANGLE_DEG": -20.0, "ESC_COMMAND_US": 1200}}
+    {"name": "neg20_esc1200", "config": {"LOG_FILE_BASE": "friction_sweep_log", "SERVO_ANGLE_DEG": -20.0, "ESC_COMMAND_US": 1200}},
+    {"name": "pos20_esc1250", "config": {"LOG_FILE_BASE": "friction_sweep_log", "SERVO_ANGLE_DEG":  20.0, "ESC_COMMAND_US": 1250}},
+    {"name": "neg20_esc1250", "config": {"LOG_FILE_BASE": "friction_sweep_log", "SERVO_ANGLE_DEG": -20.0, "ESC_COMMAND_US": 1250}},
+    {"name": "pos20_esc1300", "config": {"LOG_FILE_BASE": "friction_sweep_log", "SERVO_ANGLE_DEG":  20.0, "ESC_COMMAND_US": 1300}},
+    {"name": "neg20_esc1300", "config": {"LOG_FILE_BASE": "friction_sweep_log", "SERVO_ANGLE_DEG": -20.0, "ESC_COMMAND_US": 1300}},
+    {"name": "pos20_esc1350", "config": {"LOG_FILE_BASE": "friction_sweep_log", "SERVO_ANGLE_DEG":  20.0, "ESC_COMMAND_US": 1350}},
+    {"name": "neg20_esc1350", "config": {"LOG_FILE_BASE": "friction_sweep_log", "SERVO_ANGLE_DEG": -20.0, "ESC_COMMAND_US": 1350}},
+    {"name": "pos20_esc1400", "config": {"LOG_FILE_BASE": "friction_sweep_log", "SERVO_ANGLE_DEG":  20.0, "ESC_COMMAND_US": 1400}},
+    {"name": "neg20_esc1400", "config": {"LOG_FILE_BASE": "friction_sweep_log", "SERVO_ANGLE_DEG": -20.0, "ESC_COMMAND_US": 1400}},
+    {"name": "pos20_esc1450", "config": {"LOG_FILE_BASE": "friction_sweep_log", "SERVO_ANGLE_DEG":  20.0, "ESC_COMMAND_US": 1450}},
+    {"name": "neg20_esc1450", "config": {"LOG_FILE_BASE": "friction_sweep_log", "SERVO_ANGLE_DEG": -20.0, "ESC_COMMAND_US": 1450}},
+    {"name": "pos20_esc1500", "config": {"LOG_FILE_BASE": "friction_sweep_log", "SERVO_ANGLE_DEG":  20.0, "ESC_COMMAND_US": 1500}},
+    {"name": "neg20_esc1500", "config": {"LOG_FILE_BASE": "friction_sweep_log", "SERVO_ANGLE_DEG": -20.0, "ESC_COMMAND_US": 1500}},
+    {"name": "pos20_esc1550", "config": {"LOG_FILE_BASE": "friction_sweep_log", "SERVO_ANGLE_DEG":  20.0, "ESC_COMMAND_US": 1550}},
+    {"name": "neg20_esc1550", "config": {"LOG_FILE_BASE": "friction_sweep_log", "SERVO_ANGLE_DEG": -20.0, "ESC_COMMAND_US": 1550}},
+    {"name": "pos20_esc1600", "config": {"LOG_FILE_BASE": "friction_sweep_log", "SERVO_ANGLE_DEG":  20.0, "ESC_COMMAND_US": 1600}},
+    {"name": "neg20_esc1600", "config": {"LOG_FILE_BASE": "friction_sweep_log", "SERVO_ANGLE_DEG": -20.0, "ESC_COMMAND_US": 1600}},
+    {"name": "pos20_esc1650", "config": {"LOG_FILE_BASE": "friction_sweep_log", "SERVO_ANGLE_DEG":  20.0, "ESC_COMMAND_US": 1650}},
+    {"name": "neg20_esc1650", "config": {"LOG_FILE_BASE": "friction_sweep_log", "SERVO_ANGLE_DEG": -20.0, "ESC_COMMAND_US": 1650}},
+    {"name": "pos20_esc1700", "config": {"LOG_FILE_BASE": "friction_sweep_log", "SERVO_ANGLE_DEG":  20.0, "ESC_COMMAND_US": 1700}},
+    {"name": "neg20_esc1700", "config": {"LOG_FILE_BASE": "friction_sweep_log", "SERVO_ANGLE_DEG": -20.0, "ESC_COMMAND_US": 1700}},
+    {"name": "pos20_esc1750", "config": {"LOG_FILE_BASE": "friction_sweep_log", "SERVO_ANGLE_DEG":  20.0, "ESC_COMMAND_US": 1750}},
+    {"name": "neg20_esc1750", "config": {"LOG_FILE_BASE": "friction_sweep_log", "SERVO_ANGLE_DEG": -20.0, "ESC_COMMAND_US": 1750}},
+    {"name": "pos20_esc1800", "config": {"LOG_FILE_BASE": "friction_sweep_log", "SERVO_ANGLE_DEG":  20.0, "ESC_COMMAND_US": 1800}},
+    {"name": "neg20_esc1800", "config": {"LOG_FILE_BASE": "friction_sweep_log", "SERVO_ANGLE_DEG": -20.0, "ESC_COMMAND_US": 1800}},
+    {"name": "pos20_esc1850", "config": {"LOG_FILE_BASE": "friction_sweep_log", "SERVO_ANGLE_DEG":  20.0, "ESC_COMMAND_US": 1850}},
+    {"name": "neg20_esc1850", "config": {"LOG_FILE_BASE": "friction_sweep_log", "SERVO_ANGLE_DEG": -20.0, "ESC_COMMAND_US": 1850}},
+    {"name": "pos20_esc1900", "config": {"LOG_FILE_BASE": "friction_sweep_log", "SERVO_ANGLE_DEG":  20.0, "ESC_COMMAND_US": 1900}},
+    {"name": "neg20_esc1900", "config": {"LOG_FILE_BASE": "friction_sweep_log", "SERVO_ANGLE_DEG": -20.0, "ESC_COMMAND_US": 1900}},
+    {"name": "pos20_esc1950", "config": {"LOG_FILE_BASE": "friction_sweep_log", "SERVO_ANGLE_DEG":  20.0, "ESC_COMMAND_US": 1950}},
+    {"name": "neg20_esc1950", "config": {"LOG_FILE_BASE": "friction_sweep_log", "SERVO_ANGLE_DEG": -20.0, "ESC_COMMAND_US": 1950}}
   ]
 }

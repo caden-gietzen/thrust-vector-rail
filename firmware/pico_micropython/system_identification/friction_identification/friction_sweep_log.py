@@ -97,7 +97,7 @@ def make_config():
         "SERVO_ANGLE_DEG": 20.0,        # target vectoring angle; positive or negative
         "ESC_COMMAND_US": 1300,         # fixed ESC command held during run phase
 
-        "MAX_RUN_DURATION_S": 90,       # hard time limit; run stops even if no halt
+        "MAX_RUN_DURATION_S": 30,       # hard time limit; run stops even if no halt
         "USER_PROMPT_WAIT_S": 10,       # countdown while operator positions cart
         "SERVO_SETTLE_MS": 1000,        # dwell at target angle before applying thrust
         "COMMAND_UPDATE_DT_MS": 20,     # sample interval (50 Hz)
@@ -110,7 +110,7 @@ def make_config():
         # from run start is also below STICTION_NO_MOTION_COUNTS, the halt is
         # classified as stiction (motor didn't overcome static friction).
         "HALT_DURATION_S": 5,
-        "HALT_THRESHOLD_COUNTS": 3,
+        "HALT_THRESHOLD_COUNTS": 15,
         "STICTION_NO_MOTION_COUNTS": 15,
 
         "PRINT_EVERY_N_SAMPLES": 50,
