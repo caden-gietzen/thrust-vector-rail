@@ -70,24 +70,16 @@ NUM_TRAINING_FILES = 4;
 trainingFile = "thrust_prps_daq_voltage_set01_seed2001.csv";
 
 %% User options
-% ============================================================
 
 SAVE_FIGURES = true;
 
-runNames = [
-    "global_1100_1950"
-
-    "local_1100_1350"
-    "local_1400_1650"
-    "local_1700_1950"
-    "local_1400_1950"
-];
+% Leave empty to auto-detect run names from training data.
+runNames = strings(0, 1);
 
 USE_NOMINAL_COMMAND_DT_FOR_FRF = true;
 NOMINAL_COMMAND_DT_S = 0.020;
 
 %% PRPS / frequency extraction options
-% ============================================================
 
 % If true, use only phase == "prps".
 USE_ONLY_PRPS_PHASE = true;
@@ -147,7 +139,6 @@ REMOVE_PERIOD_MEAN = true;
 DETREND_EACH_PERIOD = false;
 
 %% Frequency-domain fitting options
-% ============================================================
 
 % Candidate model toggles.
 FIT_FIRST_ORDER                 = true;
@@ -202,8 +193,8 @@ MAX_GAIN_ABS = 0.02;
 
 % Translate fitted frequency-domain model into time-domain prediction using
 % lsim on the PRPS validation/training input.
-PLOT_TIME_DOMAIN_TRANSLATION_TRAINING   = true;
-PLOT_TIME_DOMAIN_TRANSLATION_VALIDATION = true;
+PLOT_TIME_DOMAIN_TRANSLATION_TRAINING   = false;
+PLOT_TIME_DOMAIN_TRANSLATION_VALIDATION = false;
 
 % Time-domain fit uses measured initial output offset:
 % y_model_total = mean(y_measured) + lsim(G, u - mean(u))
@@ -212,7 +203,6 @@ CENTER_TIME_DOMAIN_SIGNALS = true;
 USE_RAW_TIMESTAMP_GRID_FOR_LSIM = true;
 
 %% Plot toggles
-% Initially leave only the most telling plots true.
 % ============================================================
 
 PLOT_TRAINING_EMPIRICAL_BODE_WITH_FITS      = false;
@@ -220,9 +210,12 @@ PLOT_VALIDATION_BODE_VS_TRAINING_MODEL      = false;
 PLOT_TRAINING_VS_VALIDATION_EMPIRICAL_BODE  = false;
 PLOT_COHERENCE_BY_RUN                       = false;
 PLOT_MODEL_COMPARISON_BAR                   = false;
+PLOT_NORMALIZED_BODE                        = true;
+PLOT_COMPREHENSIVE_MODEL_COMPARISON_BAR     = true;
 
-PLOT_TIME_DOMAIN_TRANSLATION_BEST_ONLY      = true;
-PLOT_ALL_TIME_DOMAIN_MODEL_TRANSLATIONS     = false;
+PLOT_TIME_DOMAIN_TRANSLATION_BEST_ONLY_TRAINING    = false;
+PLOT_TIME_DOMAIN_TRANSLATION_BEST_ONLY_VALIDATION  = false;
+PLOT_ALL_TIME_DOMAIN_MODEL_TRANSLATIONS            = false;
 
 PLOT_RAW_PRPS_TIME_SNIPPET                  = false;
 PLOT_INPUT_SPECTRUM_DIAGNOSTIC              = false;
@@ -231,7 +224,6 @@ PLOT_SAMPLE_TIME_DIAGNOSTIC                 = false;
 PLOT_VOLTAGE_TIME                           = false;
 
 PLOT_PHASE_RESIDUAL_BY_FREQUENCY            = false;
-PLOT_NORMALIZED_BODE_MAGNITUDE              = false;
 
 PLOT_VALIDATION_BEST_FIT_TIME_WINDOW        = true;
 VALIDATION_BEST_FIT_TIME_WINDOW_S          = [60, 70];
@@ -335,6 +327,15 @@ if isempty(validationCsvFiles)
     Tval = table();
 else
     Tval = readCombinedCsvTables(validationCsvFiles);
+end
+
+if isempty(runNames)
+    runNames = unique(string(Ttrain.run_name), "stable");
+    runNames = runNames(strlength(strtrim(runNames)) > 0);
+    fprintf("\nAuto-detected run names from training data:\n");
+    for k = 1:numel(runNames)
+        fprintf("  %s\n", runNames(k));
+    end
 end
 
 %% Main frequency-domain identification loop
@@ -530,14 +531,9 @@ for r = 1:numel(runNames)
         }];
     end
 
-    if PLOT_NORMALIZED_BODE_MAGNITUDE
-        plotNormalizedBodeMagnitude(trainFrf, candidateModels, bestModel, runName, "training", ...
+    if PLOT_NORMALIZED_BODE
+        plotNormalizedBodeBestFitAllData(trainFrf, valFrf, bestModel, runName, ...
             MIN_COHERENCE_FOR_FIT, PLOT_REJECTED_FREQ_POINTS);
-    
-        if ~isempty(valFrf.f_Hz)
-            plotNormalizedBodeMagnitude(valFrf, bestModel, bestModel, runName, "validation", ...
-                MIN_COHERENCE_FOR_FIT, PLOT_REJECTED_FREQ_POINTS);
-        end
     end
 
     if PLOT_TRAINING_EMPIRICAL_BODE_WITH_FITS
@@ -565,7 +561,7 @@ for r = 1:numel(runNames)
             runName, ...
             "training", ...
             CENTER_TIME_DOMAIN_SIGNALS, ...
-            PLOT_TIME_DOMAIN_TRANSLATION_BEST_ONLY, ...
+            PLOT_TIME_DOMAIN_TRANSLATION_BEST_ONLY_TRAINING, ...
             PLOT_ALL_TIME_DOMAIN_MODEL_TRANSLATIONS, ...
             USE_RAW_TIMESTAMP_GRID_FOR_LSIM);
     end
@@ -582,7 +578,7 @@ for r = 1:numel(runNames)
                 runName, ...
                 "validation", ...
                 CENTER_TIME_DOMAIN_SIGNALS, ...
-                PLOT_TIME_DOMAIN_TRANSLATION_BEST_ONLY, ...
+                PLOT_TIME_DOMAIN_TRANSLATION_BEST_ONLY_VALIDATION, ...
                 PLOT_ALL_TIME_DOMAIN_MODEL_TRANSLATIONS, ...
                 USE_RAW_TIMESTAMP_GRID_FOR_LSIM);
         end
@@ -683,6 +679,10 @@ if ~isempty(allSummaryRows)
     fprintf("============================================================\n");
 
     compareBestModelsAcrossRegions(bestModelTable);
+
+    if PLOT_COMPREHENSIVE_MODEL_COMPARISON_BAR
+        plotComprehensiveModelComparisonBar(bestModelTable, SIMPLE_MODEL_RELATIVE_TOLERANCE);
+    end
 
 else
     fprintf("\nNo frequency-domain models generated.\n");
@@ -2357,6 +2357,111 @@ function plotPhaseResidualByFrequency(frf, model, runName, datasetLabel, minCohe
         medianExtraDelay_s, medianExtraDelay_s * 1000);
 end
 
+function plotNormalizedBodeBestFitAllData(trainFrf, valFrf, bestModel, runName, minCoherence, plotRejected)
+    if isempty(trainFrf.f_Hz)
+        return;
+    end
+
+    K_norm = abs(bestModel.K);
+
+    if ~isfinite(K_norm) || K_norm <= 0
+        warning("Skipping normalized Bode for %s: invalid K.", runName);
+        return;
+    end
+
+    fTrain  = trainFrf.f_Hz(:);
+    GTrain  = trainFrf.G_emp(:);
+    cohTrain = trainFrf.coherence(:);
+    goodTrain = isfinite(fTrain) & isfinite(GTrain) & isfinite(cohTrain) & cohTrain >= minCoherence;
+
+    hasVal = ~isempty(valFrf.f_Hz);
+    if hasVal
+        fVal   = valFrf.f_Hz(:);
+        GVal   = valFrf.G_emp(:);
+        cohVal = valFrf.coherence(:);
+        goodVal = isfinite(fVal) & isfinite(GVal) & isfinite(cohVal) & cohVal >= minCoherence;
+    end
+
+    fGoodAll = fTrain(goodTrain);
+    if hasVal
+        fGoodAll = [fGoodAll; fVal(goodVal)];
+    end
+
+    if isempty(fGoodAll)
+        return;
+    end
+
+    fFine = logspace(log10(min(fGoodAll)), log10(max(fGoodAll)), 500).';
+    wFine = 2*pi*fFine;
+    Gfit  = evalFrequencyModel(bestModel.model_type, bestModel.params, wFine);
+
+    cTrain = [0    0.9  1  ];
+    cVal   = [1    0.65 0  ];
+    cFit   = [0.45 1    0.45];
+    cFaded = [0.5  0.5  0.5];
+
+    figure;
+
+    subplot(2,1,1);
+    hold on; grid on;
+
+    if plotRejected && any(~goodTrain)
+        semilogx(fTrain(~goodTrain), 20*log10(abs(GTrain(~goodTrain)) / K_norm), "x", ...
+            "Color", cFaded, "HandleVisibility", "off");
+    end
+
+    semilogx(fTrain(goodTrain), 20*log10(abs(GTrain(goodTrain)) / K_norm), "o", ...
+        "Color", cTrain, "LineWidth", 1.2, "DisplayName", "Training FRF");
+
+    if hasVal
+        if plotRejected && any(~goodVal)
+            semilogx(fVal(~goodVal), 20*log10(abs(GVal(~goodVal)) / K_norm), "x", ...
+                "Color", cFaded, "HandleVisibility", "off");
+        end
+        semilogx(fVal(goodVal), 20*log10(abs(GVal(goodVal)) / K_norm), "s", ...
+            "Color", cVal, "LineWidth", 1.2, "DisplayName", "Validation FRF");
+    end
+
+    semilogx(fFine, 20*log10(abs(Gfit) / K_norm), "-", ...
+        "Color", cFit, "LineWidth", 2.2, "DisplayName", "Best fit: " + bestModel.model_type);
+
+    yline(0,  "--", "0 dB");
+    yline(-3, "--", "-3 dB");
+
+    ylabel("Normalized magnitude (dB re: |K|)");
+    title("Normalized Bode - " + runName, "Interpreter", "none");
+    subtitle(bestModel.model_type + "  |K| = " + sprintf("%.6g", K_norm) + " N/us", ...
+        "Interpreter", "none");
+    legend("Location", "best", "Interpreter", "none");
+
+    subplot(2,1,2);
+    hold on; grid on;
+
+    if plotRejected && any(~goodTrain)
+        semilogx(fTrain(~goodTrain), unwrap(angle(GTrain(~goodTrain))) * 180/pi, "x", ...
+            "Color", cFaded, "HandleVisibility", "off");
+    end
+
+    semilogx(fTrain(goodTrain), unwrap(angle(GTrain(goodTrain))) * 180/pi, "o", ...
+        "Color", cTrain, "LineWidth", 1.2, "DisplayName", "Training FRF");
+
+    if hasVal
+        if plotRejected && any(~goodVal)
+            semilogx(fVal(~goodVal), unwrap(angle(GVal(~goodVal))) * 180/pi, "x", ...
+                "Color", cFaded, "HandleVisibility", "off");
+        end
+        semilogx(fVal(goodVal), unwrap(angle(GVal(goodVal))) * 180/pi, "s", ...
+            "Color", cVal, "LineWidth", 1.2, "DisplayName", "Validation FRF");
+    end
+
+    semilogx(fFine, unwrap(angle(Gfit)) * 180/pi, "-", ...
+        "Color", cFit, "LineWidth", 2.2, "DisplayName", "Best fit: " + bestModel.model_type);
+
+    xlabel("Frequency (Hz)");
+    ylabel("Phase (deg)");
+    legend("Location", "best", "Interpreter", "none");
+end
+
 function plotNormalizedBodeMagnitude(frf, models, bestModel, runName, datasetLabel, minCoherence, plotRejected)
     if isempty(frf.f_Hz)
         return;
@@ -2557,6 +2662,72 @@ function plotValidationBestFitTimeWindow( ...
             break;
         end
     end
+end
+
+function plotComprehensiveModelComparisonBar(bestModelTable, tolerancePct)
+    if isempty(bestModelTable)
+        return;
+    end
+
+    runLabels  = string(bestModelTable.run_name);
+    modelTypes = string(bestModelTable.best_model_type);
+    trainMag   = bestModelTable.train_mag_rmse_dB;
+    trainPhase = bestModelTable.train_phase_rmse_deg;
+    valMag     = bestModelTable.validation_mag_rmse_dB;
+    valPhase   = bestModelTable.validation_phase_rmse_deg;
+
+    hasVal = any(isfinite(valMag));
+
+    modelShort = replace(modelTypes, ...
+        ["second_order_lag_delay", "second_order_lag", "first_order_delay", "first_order"], ...
+        ["2nd+L",                  "2nd",              "1st+L",             "1st"]);
+
+    shortRegion = replace(runLabels, ["global_", "local_"], ["G:", "L:"]);
+    shortRegion = replace(shortRegion, "_", "-");
+    xLabels     = shortRegion + " (" + modelShort + ")";
+
+    cTrain = [0    0.9  1   ];
+    cVal   = [1    0.65 0   ];
+
+    nRuns = height(bestModelTable);
+    x = (1:nRuns).';
+
+    figure;
+    sgtitle(sprintf("Best-Model RMSE by Region  (simplicity tolerance %.0f%%)", ...
+        tolerancePct * 100), "Interpreter", "none");
+
+    subplot(2,1,1);
+    hold on; grid on;
+
+    if hasVal
+        b = bar(x, [trainMag, valMag], "grouped");
+        b(1).FaceColor = cTrain;
+        b(2).FaceColor = cVal;
+        legend(["Training", "Validation"], "Location", "best");
+    else
+        b = bar(x, trainMag);
+        b.FaceColor = cTrain;
+    end
+
+    set(gca, "XTick", x, "XTickLabel", cellstr(xLabels), "XTickLabelRotation", 20);
+    ylabel("Magnitude RMSE (dB)");
+
+    subplot(2,1,2);
+    hold on; grid on;
+
+    if hasVal
+        b = bar(x, [trainPhase, valPhase], "grouped");
+        b(1).FaceColor = cTrain;
+        b(2).FaceColor = cVal;
+        legend(["Training", "Validation"], "Location", "best");
+    else
+        b = bar(x, trainPhase);
+        b.FaceColor = cTrain;
+    end
+
+    set(gca, "XTick", x, "XTickLabel", cellstr(xLabels), "XTickLabelRotation", 20);
+    ylabel("Phase RMSE (deg)");
+    xlabel("Region  (selected model)");
 end
 
 %% General table / utility helpers

@@ -15,12 +15,12 @@
 
   "sequence": [
     {
-      "name": "local_1400_1950",
+      "name": "local_1075_1650",
       "config": {
-        "LOG_FILE_BASE": "thrust_prps_daq_voltage_local_1400_1950",
+        "LOG_FILE_BASE": "thrust_prps_daq_voltage_local_1075_1650",
         "COOLDOWN_BETWEEN_SETS_MS": 30000,
         "TEST_RUNS": [
-          ["local_1400_1950", 1675, 275]
+          ["local_1075_1650", 1363, 288]
         ]
       }
     }

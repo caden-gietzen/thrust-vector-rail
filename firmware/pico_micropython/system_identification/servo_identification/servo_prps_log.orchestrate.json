@@ -1,6 +1,6 @@
 {
   "orchestration_version": 1,
-  "description": "Repeated servo PRPS training campaign for amplitude 750 us with 25 log-spaced frequency points from 0.10 to 3 Hz.",
+  "description": "Repeated servo PRPS training campaign for amplitude 250 us with 25 log-spaced frequency points from 0.10 to 3 Hz.",
   "remote_config_path": "run_config.json",
   "write_manifest": false,
 
@@ -14,10 +14,10 @@
 
   "sequence": [
     {
-      "name": "train_servo_amp750_0p10_to_3Hz",
+      "name": "train_servo_amp250_0p10_to_3Hz",
       "script": "servo_prps_log.py",
       "config": {
-        "LOG_FILE_BASE": "train_servo_prps_amp750_0p10_to_3Hz",
+        "LOG_FILE_BASE": "train_servo_prps_amp250_0p10_to_3Hz",
         "NUM_ACQUISITION_SETS": 1,
         "COOLDOWN_BETWEEN_SETS_MS": 0,
 
@@ -32,7 +32,7 @@
         "COMMAND_UPDATE_DT_MS": 10,
 
         "TEST_RUNS": [
-          ["train_amp750", 1450, 750]
+          ["train_amp250", 1450, 250]
         ]
       }
     }

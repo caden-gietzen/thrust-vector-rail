@@ -35,7 +35,7 @@ The thrust identification procedure follows the same general framework used for 
 
 The question of which broadband excitation signal to use is important, and the answer differs from the servo case. For the servo, the initial plan included step response testing before moving to PRPS. For thrust, PRPS is used directly without a step response step.
 
-### Why PRPS is preferred from the start:**
+### Why PRPS is preferred from the start:
 
 PRPS (pseudo-random phase-sum / periodic multisine) excites a user-selected set of sinusoidal frequencies simultaneously, with controlled amplitude and random phases. This gives several advantages over PRBS for thrust identification:
 
