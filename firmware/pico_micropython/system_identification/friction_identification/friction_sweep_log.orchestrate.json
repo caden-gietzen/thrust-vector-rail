@@ -1,0 +1,19 @@
+{
+  "orchestration_version": 1,
+  "description": "Friction sweep: 3 ESC commands separated by 50 us, 2 passes each. Edit the 3 ESC_COMMAND_US values between batches to step through the full thrust range.",
+  "remote_config_path": "run_config.json",
+  "write_manifest": false,
+
+  "repeat_sequence": {
+    "count": 2
+  },
+
+  "sequence": [
+    {"name": "pos20_esc1100", "config": {"LOG_FILE_BASE": "friction_sweep_log", "SERVO_ANGLE_DEG":  20.0, "ESC_COMMAND_US": 1100}},
+    {"name": "neg20_esc1100", "config": {"LOG_FILE_BASE": "friction_sweep_log", "SERVO_ANGLE_DEG": -20.0, "ESC_COMMAND_US": 1100}},
+    {"name": "pos20_esc1150", "config": {"LOG_FILE_BASE": "friction_sweep_log", "SERVO_ANGLE_DEG":  20.0, "ESC_COMMAND_US": 1150}},
+    {"name": "neg20_esc1150", "config": {"LOG_FILE_BASE": "friction_sweep_log", "SERVO_ANGLE_DEG": -20.0, "ESC_COMMAND_US": 1150}},
+    {"name": "pos20_esc1200", "config": {"LOG_FILE_BASE": "friction_sweep_log", "SERVO_ANGLE_DEG":  20.0, "ESC_COMMAND_US": 1200}},
+    {"name": "neg20_esc1200", "config": {"LOG_FILE_BASE": "friction_sweep_log", "SERVO_ANGLE_DEG": -20.0, "ESC_COMMAND_US": 1200}}
+  ]
+}
