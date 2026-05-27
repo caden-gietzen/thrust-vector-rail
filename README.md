@@ -54,11 +54,7 @@ Initial performance targets:
 - respect servo angle limits
 - log time-stamped position, velocity estimate, actuator commands, and controller output
 
-Detailed requirements and constraints are documented in:
-
-```
-docs/objectives_requirements_constraints.md
-```
+Detailed requirements and constraints are documented in [docs/objectives_requirements_constrains.md](docs/objectives_requirements_constrains.md).
 
 ## Nominal Dynamic Model
 

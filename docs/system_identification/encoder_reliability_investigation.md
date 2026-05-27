@@ -1,5 +1,7 @@
 # Encoder Reliability Investigation Under High-Frequency Servo Excitation
 
+> This investigation was conducted during early servo characterization. The servo identification procedure and accepted operating limits are documented in [experiments/servo_identification/procedure.md](../../experiments/servo_identification/procedure.md). The encoder count-to-angle calibration result (2414 counts/rev, confirming the 2400 nominal) is in [experiments/servo_identification/results.md — Section 2](../../experiments/servo_identification/results.md#2-encoder-count-to-angle-calibration). Rail linear encoder calibration (64.810 counts/mm) is in [experiments/encoder_calibration/results.md](../../experiments/encoder_calibration/results.md).
+
 ## Overview
 
 During high-frequency servo excitation tests, the quadrature encoder measurement system exhibited apparent drift and loss of positional consistency after repeated bidirectional motion. The issue became increasingly noticeable during aggressive pseudo-random excitation and rapid back-and-forth motion.

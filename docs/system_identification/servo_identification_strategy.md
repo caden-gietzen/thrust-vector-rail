@@ -9,7 +9,7 @@ Use **Pseudo-Random Binary Signal (PRBS)** first to get a rough Bode-style estim
 - whether the servo behaves like first-order, second-order, or rate-limited dynamics,
 - what frequency range is worth exciting with PRPS.
 
-This is the same logic as the thrust workflow, except now:
+This is the same logic as the [thrust identification workflow](../../experiments/thrust_identification/procedure.md), except now:
 
 $$
 G_{\text{servo}}(j\omega)=\frac{\Theta(j\omega)}{U(j\omega)}
@@ -59,4 +59,4 @@ $$
 \theta_{\text{deg}} = 360 \cdot \frac{\text{count}}{2400}
 $$​
 
-But verify this experimentally. Command a slow sweep or manually rotate the servo pulley one full revolution if mechanically possible and check the count change. Do not blindly trust the 2400 number until confirmed.
+But verify this experimentally. Command a slow sweep or manually rotate the servo pulley one full revolution if mechanically possible and check the count change. Do not blindly trust the 2400 number until confirmed — see [Section 2 of the servo identification results](../../experiments/servo_identification/results.md#2-encoder-count-to-angle-calibration) for the measured calibration (1207 counts over a half-revolution, confirming ≈ 2414 counts/rev).

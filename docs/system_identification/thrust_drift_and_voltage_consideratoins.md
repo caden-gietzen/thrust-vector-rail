@@ -1,5 +1,7 @@
 # Thrust Drift and Voltage Considerations
 
+> This investigation informed the design of the final PRPS thrust identification campaign. For the selected model and quantified results, see [experiments/thrust_identification/results.md](../../experiments/thrust_identification/results.md).
+
 # Observation
 
 Sequential PRBS thrust identification experiments exhibited a noticeable reduction in measured thrust output across repeated runs, even when commanded PWM ranges and operating conditions remained nominally consistent.

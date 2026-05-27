@@ -52,7 +52,7 @@ Direct actuation, such as a belt-driven motor, wheel-driven cart, linear actuato
 
 However, this approach would remove the thrust-vectoring geometry that makes the system useful as a nonlinear controls testbed. With opposing fixed motors, the system would primarily become a one-dimensional force-control problem. By contrast, thrust vectoring requires the controller to account for nonlinear input geometry, actuator saturation, servo bandwidth limits, and coupling between the propulsion and vectoring subsystems.
 
-This design choice makes the rail system more relevant to unmanned aerial vehicle control than a directly actuated cart. Although the rail constrains the vehicle to one translational degree of freedom, the system preserves the important aerial-vehicle control concept that translational acceleration is generated indirectly through the magnitude and direction of a propulsion force.
+This design choice makes the rail system more relevant to unmanned aerial vehicle control than a directly actuated cart. Although the rail constrains the vehicle to one translational degree of freedom, the system preserves the important aerial-vehicle control concept that translational acceleration is generated indirectly through the magnitude and direction of a propulsion force. The servo was characterized as a first-order-plus-delay actuator ($\tau = 24.4$ ms, $L = 28.8$ ms); see [experiments/servo_identification/results.md](../experiments/servo_identification/results.md) for the full identification.
 
 ### Low-Friction Rail
 
@@ -62,7 +62,7 @@ The rail constrains the vehicle to one translational degree of freedom while red
 
 A quadrature encoder was selected as the primary position sensor because the system requires direct measurement of cart position for closed-loop control. The encoder provides a high-resolution and cost-effective way to measure linear displacement along the rail when coupled to the cart through a pulley and belt system.
 
-Position measurement is the minimum required sensing capability for stabilization, tracking, velocity estimation, system identification, and performance evaluation. The encoder also introduces realistic sensing limitations, including finite resolution, missed counts, noise, and sampling constraints.
+Position measurement is the minimum required sensing capability for stabilization, tracking, velocity estimation, system identification, and performance evaluation. The encoder also introduces realistic sensing limitations, including finite resolution, missed counts, noise, and sampling constraints. The measured conversion constant is 64.810 counts/mm (8% above nominal); see [experiments/encoder_calibration/results.md](../experiments/encoder_calibration/results.md) for the calibration procedure and results.
 
 ---
 

@@ -17,4 +17,4 @@ The purpose of this project is to create a physical test platform for learning a
 
 ## Current Development Stage
 
-The project is currently in early experimental development. Initial work is focused on reliable sensor measurement, thrust characterization, servo behavior, and simple stabilizing control.
+The project is currently in early experimental development. Initial work is focused on reliable sensor measurement, thrust characterization, servo behavior, and simple stabilizing control. For the current engineering status and completed actuator models, see the [project README](../README.md). For experiment-level details, see [experiments/servo_identification/results.md](../experiments/servo_identification/results.md) (servo — complete), [experiments/thrust_identification/results.md](../experiments/thrust_identification/results.md) (thrust — complete), and [experiments/friction_identification/procedure.md](../experiments/friction_identification/procedure.md) (friction — in progress).

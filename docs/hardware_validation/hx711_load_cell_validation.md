@@ -229,4 +229,4 @@ The subsystem is therefore considered validated for progression into:
 
 - thrust mapping,
 - open-loop thrust characterization,
-- and subsequent control-oriented system identification experiments for the thrust-vector rail platform.
+- and subsequent [control-oriented system identification experiments](../../experiments/thrust_identification/procedure.md) for the thrust-vector rail platform.
