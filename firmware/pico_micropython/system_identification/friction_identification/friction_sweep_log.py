@@ -113,6 +113,8 @@ def make_config():
         "HALT_THRESHOLD_COUNTS": 15,
         "STICTION_NO_MOTION_COUNTS": 15,
 
+        "REPOSITION_TIMEOUT_S": 30,     # max time for end-stop reposition before giving up
+
         "PRINT_EVERY_N_SAMPLES": 50,
     }
 
@@ -463,6 +465,55 @@ def run_single_set(cfg, state, f, servo, escs, t0_ms, set_index):
     write_servo_us(cfg, servo, servo_neutral)
     time.sleep_ms(500)
 
+    run_reposition_phase(cfg, state, f, servo, escs, t0_ms, set_index, count_at_run_start)
+
+
+def run_reposition_phase(cfg, state, f, servo, escs, t0_ms, set_index, count_at_run_start):
+    """
+    Drive cart at PWM_HARD_MAX_US with the same servo angle as the current run
+    until the end-stop halt fires. Ensures the cart is at the correct starting
+    position for the next segment in the alternating pos/neg sweep sequence.
+    """
+    segment       = cfg["SEGMENT_NAME"]
+    servo_target  = cfg["SERVO_TARGET_US"]
+    reposition_us = 1750
+    dt_ms         = cfg["COMMAND_UPDATE_DT_MS"]
+
+    print()
+    print("Repositioning: servo", servo_target, "us  ESC", reposition_us, "us")
+    write_servo_us(cfg, servo, servo_target)
+    time.sleep_ms(cfg["SERVO_SETTLE_MS"])
+    set_esc_us(cfg, escs, reposition_us)
+
+    phase     = "reposition"
+    halt_buf  = [encoder.get_count()] * cfg["HALT_WINDOW_SAMPLES"]
+    halt_idx  = 0
+    n_timeout = int(cfg["REPOSITION_TIMEOUT_S"] * 1000 / dt_ms)
+
+    for rep_sample in range(n_timeout):
+        loop_start       = time.ticks_ms()
+        count            = encoder.get_count()
+        count_from_start = count - count_at_run_start
+
+        write_sample(cfg, state, f, t0_ms, set_index, segment, phase,
+                     servo_target, reposition_us, count, count_from_start)
+
+        halt_buf[halt_idx] = count
+        halt_idx = (halt_idx + 1) % cfg["HALT_WINDOW_SAMPLES"]
+
+        if rep_sample >= cfg["HALT_WINDOW_SAMPLES"] - 1:
+            if max(halt_buf) - min(halt_buf) < cfg["HALT_THRESHOLD_COUNTS"]:
+                print("Reposition complete.")
+                break
+
+        sleep_to_next_sample(cfg, loop_start)
+    else:
+        print("Reposition timeout.")
+
+    set_esc_us(cfg, escs, cfg["PWM_SAFE_US"])
+    write_servo_us(cfg, servo, cfg["SERVO_NEUTRAL_US"])
+    time.sleep_ms(500)
+
 
 # ============================================================
 # Acquisition set loop
@@ -541,6 +592,7 @@ def print_startup_banner(cfg):
     print("  HALT_DURATION    :", cfg["HALT_DURATION_S"], "s")
     print("  HALT_THRESHOLD   :", cfg["HALT_THRESHOLD_COUNTS"], "counts")
     print("  STICTION_THRESH  :", cfg["STICTION_NO_MOTION_COUNTS"], "counts")
+    print("  REPOSITION_TIMEOUT:", cfg["REPOSITION_TIMEOUT_S"], "s")
     print("  SEGMENT_NAME     :", cfg["SEGMENT_NAME"])
     print()
 
