@@ -31,9 +31,7 @@
 
 close all; clear; clc
 
-% =========================================================
-%  USER-EDITABLE PARAMETERS
-% =========================================================
+%% User-Editable Parameters
 
 SAVE_FIGURES = true;
 
@@ -65,9 +63,7 @@ V_MIN_MPS   = 0.01;     % exclude samples where |xdot| < this (sign ambiguity ne
 % --- Model selection ---
 SIMPLICITY_TOLERANCE = 0.10;  % accept ≤10% worse RMSE to prefer simpler model
 
-% =========================================================
-%  SETUP — utilities, paths, figure index
-% =========================================================
+%% Setup
 
 scriptPath = mfilename('fullpath');
 repoRoot   = findRepoRoot(fileparts(scriptPath));
@@ -75,12 +71,10 @@ plotDir    = getMirroredPlotDir(scriptPath);
 
 figNum = 0;
 
-% =========================================================
-%  LOAD CSV FILES
-% =========================================================
+%% Load CSV Files
 
 % Try accepted first; fall back to candidate.
-dataDir = getMirroredRawDataDir(scriptPath, 'diagnostics');
+dataDir = getMirroredRawDataDir(scriptPath, 'accepted');
 if ~isfolder(dataDir) || isempty(dir(fullfile(dataDir, '*.csv')))
     fprintf('No accepted data found. Trying candidate...\n');
     dataDir = getMirroredRawDataDir(scriptPath, 'candidate');
@@ -93,9 +87,7 @@ end
 
 fprintf('Loading %d CSV file(s) from:\n  %s\n\n', numel(csvFiles), dataDir);
 
-% =========================================================
-%  PARSE RUNS
-% =========================================================
+%% Parse Runs
 % Each CSV corresponds to one segment (one ESC command level, one angle direction).
 % Extract key metadata from the constant-value columns during the 'run' phase.
 
@@ -152,9 +144,7 @@ if nRuns == 0
 end
 fprintf('\nTotal runs: %d\n\n', nRuns);
 
-% =========================================================
-%  BUILD TRANSFER FUNCTION MODELS (via Padé approximation)
-% =========================================================
+%% Build Transfer Function Models
 
 % Servo: G_servo(s) = K_servo / (tau_servo*s + 1) * exp(-L_servo*s)
 % Note: the static gain is negative (increasing u → decreasing angle),
@@ -168,9 +158,7 @@ G_servo = tf(K_servo, [tau_servo, 1]) * tf(n_servo_pad, d_servo_pad);
 [n_thrust_pad, d_thrust_pad] = pade(L_T, 3);
 G_thrust = tf(K_T, [tau_T, 1]) * tf(n_thrust_pad, d_thrust_pad);
 
-% =========================================================
-%  STICTION ANALYSIS
-% =========================================================
+%% Stiction Analysis
 
 fprintf('=== Stiction Analysis ===\n');
 fprintf('%-8s  %-8s  %-14s  %-14s  %-10s\n', ...
@@ -220,13 +208,12 @@ for sgn = [1, -1]
 end
 fprintf('\n');
 
-% =========================================================
-%  PROCESS MOTION RUNS — position, velocity, acceleration
-% =========================================================
+%% Process Motion Runs
 
-allXdot  = [];
-allFfric = [];
-allEsc   = [];
+allXdot    = [];
+allFfric   = [];
+allEsc     = [];
+allDirSign = [];   % +1 / -1 matching runs(k).angle_sign
 
 for k = 1:nRuns
     if ~runs(k).is_motion
@@ -306,9 +293,10 @@ for k = 1:nRuns
     runs(k).F_thrust    = F_thrust;
     runs(k).idx_valid   = idx_valid;
 
-    allXdot  = [allXdot;  xdot(idx_valid)];
-    allFfric = [allFfric; F_fric(idx_valid)];
-    allEsc   = [allEsc;   ones(sum(idx_valid),1) * runs(k).esc_us];
+    allXdot    = [allXdot;    xdot(idx_valid)];
+    allFfric   = [allFfric;   F_fric(idx_valid)];
+    allEsc     = [allEsc;     ones(sum(idx_valid),1) * runs(k).esc_us];
+    allDirSign = [allDirSign; ones(sum(idx_valid),1) * runs(k).angle_sign];
 end
 
 if isempty(allXdot)
@@ -317,9 +305,7 @@ end
 
 fprintf('Pooled %d valid samples from motion runs.\n\n', numel(allXdot));
 
-% =========================================================
-%  FIT THREE FRICTION MODEL CANDIDATES
-% =========================================================
+%% Fit Friction Model Candidates
 
 sgn_v = sign(allXdot);
 
@@ -341,9 +327,7 @@ mu_vc        = params_vc(2);
 Fpred_vc     = b_vc * allXdot + mu_vc * sgn_v;
 rmse_vc      = rms(Fpred_vc - allFfric);
 
-% =========================================================
-%  MODEL SELECTION (simplicity tolerance)
-% =========================================================
+%% Model Selection
 
 rmse_best_1param = min(rmse_visc, rmse_coul);
 
@@ -364,9 +348,7 @@ else
     rmse_sel = rmse_coul;
 end
 
-% =========================================================
-%  MASS UNCERTAINTY PROPAGATION
-% =========================================================
+%% Mass Uncertainty Propagation
 
 M_lo = M_kg - M_sigma_kg;
 M_hi = M_kg + M_sigma_kg;
@@ -391,9 +373,7 @@ p_hi = [allXdot, sgn_v] \ Ffric_hi;
 b_lo  = min(p_lo(1), p_hi(1));  b_hi  = max(p_lo(1), p_hi(1));
 mu_lo = min(p_lo(2), p_hi(2));  mu_hi = max(p_lo(2), p_hi(2));
 
-% =========================================================
-%  PRINT SUMMARY
-% =========================================================
+%% Print Summary
 
 fprintf('============================================================\n');
 fprintf('Friction Model Comparison\n');
@@ -415,9 +395,52 @@ fprintf('  b  ∈ [%.4f, %.4f] N·s/m\n', b_lo, b_hi);
 fprintf('  mu ∈ [%.4f, %.4f] N\n', mu_lo, mu_hi);
 fprintf('============================================================\n');
 
-% =========================================================
-%  FIGURE 1 — Representative run: position, velocity, acceleration
-% =========================================================
+%% Directional Asymmetry
+% Note: for this test design, positive angle_sign → xdot > 0 and
+% negative angle_sign → xdot < 0, so direction and motion sign are
+% confounded.  The comparison still reveals whether friction magnitude
+% differs between the two traversal directions.
+
+dir_signs  = [1, -1];
+dir_labels = {'+20 deg', '-20 deg'};
+b_dir      = nan(1,2);
+mu_dir     = nan(1,2);
+rmse_dir_v = nan(1,2);
+n_dir      = zeros(1,2);
+asym_flag  = false;
+
+fprintf('=== Directional Asymmetry ===\n');
+for di = 1:2
+    mask_d   = (allDirSign == dir_signs(di));
+    n_dir(di) = sum(mask_d);
+    if n_dir(di) < 10
+        fprintf('  %s: too few samples (%d), skipping.\n', dir_labels{di}, n_dir(di));
+        continue;
+    end
+    xd = allXdot(mask_d);
+    fd = allFfric(mask_d);
+    p  = [xd, sign(xd)] \ fd;
+    b_dir(di)      = p(1);
+    mu_dir(di)     = p(2);
+    rmse_dir_v(di) = rms(fd - (p(1)*xd + p(2)*sign(xd)));
+    fprintf('  %s:  b = %.4f N*s/m,  mu = %.4f N,  RMSE = %.4f N  (n=%d)\n', ...
+        dir_labels{di}, p(1), p(2), rmse_dir_v(di), n_dir(di));
+end
+
+if ~any(isnan(b_dir))
+    b_asym  = abs(b_dir(1)  - b_dir(2))  / mean(abs(b_dir))  * 100;
+    mu_asym = abs(mu_dir(1) - mu_dir(2)) / mean(abs(mu_dir)) * 100;
+    fprintf('  Delta_b = %.1f%%,  Delta_mu = %.1f%%\n', b_asym, mu_asym);
+    asym_flag = max(b_asym, mu_asym) > 20;
+    if asym_flag
+        fprintf('  *** Significant asymmetry (>20%%) — direction-dependent model recommended. ***\n');
+    else
+        fprintf('  Asymmetry within 20%% — pooled model is adequate.\n');
+    end
+end
+fprintf('\n');
+
+%% Figure 1 — Representative Run
 
 % Find the motion run with the highest ESC command for the +20° direction.
 motionIdx = find(arrayfun(@(r) r.is_motion && isfield(r,'xdot') && r.angle_sign > 0, runs));
@@ -444,9 +467,7 @@ if ~isempty(motionIdx)
     ylabel('Accel (m/s²)'); xlabel('Time (s)'); grid on;
 end
 
-% =========================================================
-%  FIGURE 2 — Stiction boundary: halt type vs ESC command
-% =========================================================
+%% Figure 2 — Stiction Boundary
 
 figNum = figNum + 1;
 figure(figNum);
@@ -471,9 +492,7 @@ ylabel('ESC command (µs)');
 title('Halt classification by run (green = motion, red = stiction)');
 grid on;
 
-% =========================================================
-%  FIGURE 3 — F_friction scatter vs xdot, all motion runs
-% =========================================================
+%% Figure 3 — Friction Scatter vs Velocity
 
 figNum = figNum + 1;
 figure(figNum);
@@ -505,9 +524,7 @@ legend('show', 'Location', 'best');
 grid on;
 colorbar; clim([min(esc_all_unique), max(esc_all_unique)]);
 
-% =========================================================
-%  FIGURE 4 — Residual histogram (selected model)
-% =========================================================
+%% Figure 4 — Residual Histogram
 
 switch selected_model
     case 'viscous_coulomb'; resid = allFfric - (b_vc * allXdot + mu_vc * sgn_v);
@@ -523,9 +540,7 @@ ylabel('Count');
 title(sprintf('Residual histogram — %s model  (RMSE = %.4f N)', selected_model, rmse_sel));
 grid on;
 
-% =========================================================
-%  FIGURE 5 — Per-direction friction scatter
-% =========================================================
+%% Figure 5 — Per-Direction Friction Scatter
 
 figNum = figNum + 1;
 figure(figNum);
@@ -552,9 +567,7 @@ for di = 1:2
     grid on;
 end
 
-% =========================================================
-%  FIGURE 6 — Mass sensitivity bands
-% =========================================================
+%% Figure 6 — Mass Sensitivity Bands
 
 figNum = figNum + 1;
 figure(figNum);
@@ -572,17 +585,51 @@ title('Mass sensitivity: friction model bands over ±0.3 lb uncertainty');
 legend('show', 'Location', 'best');
 grid on;
 
-% =========================================================
-%  SAVE FIGURES
-% =========================================================
+%% Figure 7 — Per-Direction Model Comparison
+
+if ~any(isnan(b_dir))
+    figNum = figNum + 1;
+    figure(figNum);
+    hold on;
+
+    dir_colors = {[0 0.9 1], [1 0.65 0]};   % cyan (+), orange (-)
+    v_sweep = linspace(min(allXdot), max(allXdot), 300);
+    sgn_sweep = sign(v_sweep);
+
+    for di = 1:2
+        mask_d = (allDirSign == dir_signs(di));
+        scatter(allXdot(mask_d), allFfric(mask_d), 4, dir_colors{di}, 'filled', ...
+            'DisplayName', sprintf('%s data', dir_labels{di}));
+    end
+    for di = 1:2
+        plot(v_sweep, b_dir(di)*v_sweep + mu_dir(di)*sgn_sweep, '-', ...
+            'Color', dir_colors{di}, 'LineWidth', 2, ...
+            'DisplayName', sprintf('%s fit  b=%.4f  mu=%.4f', dir_labels{di}, b_dir(di), mu_dir(di)));
+    end
+    plot(v_sweep, b_vc*v_sweep + mu_vc*sgn_sweep, '--', ...
+        'Color', [0.75 0.75 0.75], 'LineWidth', 1.5, 'DisplayName', 'pooled fit');
+
+    xlabel('Velocity (m/s)'); ylabel('F_{friction} (N)');
+    title('Per-direction friction model comparison');
+    legend('show', 'Location', 'best');
+    grid on;
+end
+
+%% Save Figures
 
 if SAVE_FIGURES
     saveAllFiguresIfEnabled(true, plotDir);
 end
 
-% =========================================================
-%  LOCAL FUNCTIONS
-% =========================================================
+%% Write Analysis Report
+
+reportPath = fullfile(plotDir, 'analyze_friction_sweep.report.md');
+writeAnalysisReport(reportPath, nRuns, selected_model, b_sel, mu_sel, rmse_sel, ...
+    b_dir, mu_dir, rmse_dir_v, n_dir, dir_labels, ...
+    b_lo, b_hi, mu_lo, mu_hi, M_kg, M_sigma_kg, dataDir, asym_flag);
+fprintf('Report written to:\n  %s\n', reportPath);
+
+%% Local Functions
 
 function label = motionLabel(isMotion)
     if isMotion
@@ -602,4 +649,58 @@ function label = haltLabel(hasStiction, hasEndstop, hasTimeout)
     else
         label = 'unclear';
     end
+end
+
+function writeAnalysisReport(path, nRuns, model, b, mu, rmse, ...
+    b_dir, mu_dir, rmse_dir, n_dir, dir_labels, ...
+    b_lo, b_hi, mu_lo, mu_hi, M, M_sig, dataDir, asym_flag)
+
+    fid = fopen(path, 'w');
+    fprintf(fid, '# Friction Sweep Analysis Report\n\n');
+    fprintf(fid, '**Generated:** %s  \n', datestr(now, 'yyyy-mm-dd HH:MM:SS'));
+    fprintf(fid, '**Dataset:** `%s`  \n', strrep(dataDir, '\', '/'));
+    fprintf(fid, '**Runs loaded:** %d\n\n', nRuns);
+
+    fprintf(fid, '## Selected Friction Model: `%s`\n\n', model);
+    if b ~= 0
+        fprintf(fid, '- **b** (viscous)  = %.4f N·s/m\n', b);
+    end
+    if mu ~= 0
+        fprintf(fid, '- **mu** (Coulomb) = %.4f N\n', mu);
+    end
+    fprintf(fid, '- **RMSE** = %.4f N\n\n', rmse);
+
+    fprintf(fid, '## Mass Sensitivity (M = %.3f +/- %.3f kg)\n\n', M, M_sig);
+    fprintf(fid, '- b  in [%.4f, %.4f] N·s/m\n', b_lo, b_hi);
+    fprintf(fid, '- mu in [%.4f, %.4f] N\n\n', mu_lo, mu_hi);
+
+    fprintf(fid, '## Directional Asymmetry\n\n');
+    fprintf(fid, '| Direction | b (N·s/m) | mu (N) | RMSE (N) | n |\n');
+    fprintf(fid, '|-----------|-----------|--------|----------|---|\n');
+    for di = 1:2
+        if isnan(b_dir(di))
+            fprintf(fid, '| %s | — | — | — | %d |\n', dir_labels{di}, n_dir(di));
+        else
+            fprintf(fid, '| %s | %.4f | %.4f | %.4f | %d |\n', ...
+                dir_labels{di}, b_dir(di), mu_dir(di), rmse_dir(di), n_dir(di));
+        end
+    end
+    fprintf(fid, '\n');
+
+    if ~any(isnan(b_dir))
+        b_asym  = abs(b_dir(1) - b_dir(2)) / mean(abs(b_dir))  * 100;
+        mu_asym = abs(mu_dir(1) - mu_dir(2)) / mean(abs(mu_dir)) * 100;
+        fprintf(fid, '**Delta_b = %.1f%%**, **Delta_mu = %.1f%%**\n\n', b_asym, mu_asym);
+        if asym_flag
+            fprintf(fid, '**WARNING: Significant directional asymmetry (>20%%).**\n');
+            fprintf(fid, 'Direction-dependent friction model recommended.\n\n');
+        else
+            fprintf(fid, 'Asymmetry within 20%% — pooled model adequate.\n\n');
+        end
+        fprintf(fid, '_Note: for this test design, positive servo direction produces positive_\n');
+        fprintf(fid, '_velocity and negative servo direction produces negative velocity, so_\n');
+        fprintf(fid, '_servo direction and motion direction are confounded in this comparison._\n\n');
+    end
+
+    fclose(fid);
 end

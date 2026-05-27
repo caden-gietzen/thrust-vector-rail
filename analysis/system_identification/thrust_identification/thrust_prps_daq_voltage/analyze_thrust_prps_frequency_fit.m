@@ -51,7 +51,6 @@
 clear; clc; close all
 
 %% Dataset split options
-% ============================================================
 
 % Data split modes:
 %   "folders"       = load training/validation files from explicit folders
@@ -189,7 +188,6 @@ MIN_GAIN_ABS = 1e-6;
 MAX_GAIN_ABS = 0.02;
 
 %% Time-domain translation options
-% ============================================================
 
 % Translate fitted frequency-domain model into time-domain prediction using
 % lsim on the PRPS validation/training input.
@@ -203,7 +201,6 @@ CENTER_TIME_DOMAIN_SIGNALS = true;
 USE_RAW_TIMESTAMP_GRID_FOR_LSIM = true;
 
 %% Plot toggles
-% ============================================================
 
 PLOT_TRAINING_EMPIRICAL_BODE_WITH_FITS      = false;
 PLOT_VALIDATION_BODE_VS_TRAINING_MODEL      = false;
@@ -234,7 +231,6 @@ VALIDATION_BEST_FIT_TIME_WINDOW_S          = [60, 70];
 PLOT_ALL_VALIDATION_TIME_WINDOW_GROUPS      = false;
 
 %% Locate mirrored folders and select train/validation files
-% ============================================================
 
 scriptPath = mfilename("fullpath");
 
@@ -319,7 +315,6 @@ end
 trainingLabel = makeFileListLabel(trainingCsvFiles);
 
 %% Load combined tables
-% ============================================================
 
 Ttrain = readCombinedCsvTables(trainingCsvFiles);
 
@@ -339,7 +334,6 @@ if isempty(runNames)
 end
 
 %% Main frequency-domain identification loop
-% ============================================================
 
 allSummaryRows = [];
 allBestRows = [];
@@ -617,7 +611,6 @@ end
 end
 
 %% Summary tables and cross-region parameter comparisons
-% ============================================================
 
 if ~isempty(allSummaryRows)
     summaryTable = cell2table(allSummaryRows, ...
@@ -690,12 +683,10 @@ end
 
 
 %% Save figures
-% ============================================================
 
 saveAllFiguresIfEnabled(SAVE_FIGURES, plotDir);
 
 %% Local helper functions
-% ============================================================
 
 function csvFiles = getSortedCsvFilesFromFolder(folderPath, requireNonempty)
     if ~isfolder(folderPath)
@@ -1822,7 +1813,6 @@ function printRatioToReference(name, value, reference)
 end
 
 %% Plotting functions
-% ============================================================
 
 function plotEmpiricalBodeWithFits(frf, models, bestModel, runName, datasetLabel, minCoherence, plotRejected)
     f = frf.f_Hz(:);
@@ -2731,7 +2721,6 @@ function plotComprehensiveModelComparisonBar(bestModelTable, tolerancePct)
 end
 
 %% General table / utility helpers
-% ============================================================
 
 function T = readCombinedCsvTables(csvFileStruct)
     tables = cell(numel(csvFileStruct), 1);
