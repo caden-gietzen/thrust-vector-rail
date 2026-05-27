@@ -367,4 +367,4 @@ Next steps:
 5. Estimate FRF and coherence from collected data.
 6. Fit and validate low-order thrust models.
 7. Select the simplest model that supports initial pole-placement controller design.
-8. Document identified parameters in `results.md`.
+8. Document identified parameters in [`experiments/thrust_identification/results.md`](results.md).
