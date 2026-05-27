@@ -187,6 +187,7 @@ cython_debug/
 .vscode/*
 !.vscode/tasks.json
 !.vscode/extensions.json
+!.vscode/settings.json
 
 # MATLAB editable figure files
 *.fig
@@ -194,5 +195,15 @@ cython_debug/
 # MATLAB autosave backup files
 *.asv
 
+# MATLAB Simulink generated build artifacts
+slprj/
+
 # Claude Code
 CLAUDE.md
+
+# Auto-generated analysis reports (written by MATLAB analysis scripts)
+*.report.md
+
+# Local daily notes (not shared)
+00_notes.md
+AA_notes.md
