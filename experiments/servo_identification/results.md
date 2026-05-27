@@ -25,10 +25,10 @@ Final conclusion:
 
 | Item | Path |
 |---|---|
-| Raw data | [`data/raw/system_identification/servo_identification/servo_half_revolution_sweep_log/accepted/`](data/raw/system_identification/servo_identification/servo_half_revolution_sweep_log/accepted) |
-| Analysis script | [`analysis/system_identification/servo_identification/servo_half_revolution_sweep_log`](analysis/system_identification/servo_identification/servo_half_revolution_sweep_log) |
-| Plots | [`plots/system_identification/servo_identification/servo_half_revolution_sweep_log`](plots/system_identification/servo_identification/servo_half_revolution_sweep_log) |
-| Procedure | [`experiments/servo_identification/procedure.md`](experiments/servo_identification/procedure.md) |
+| Raw data | [`data/raw/system_identification/servo_identification/servo_half_revolution_sweep_log/accepted/`](../../data/raw/system_identification/servo_identification/servo_half_revolution_sweep_log/accepted) |
+| Analysis script | [`analysis/system_identification/servo_identification/servo_half_revolution_sweep_log`](../../analysis/system_identification/servo_identification/servo_half_revolution_sweep_log) |
+| Plots | [`plots/system_identification/servo_identification/servo_half_revolution_sweep_log`](../../plots/system_identification/servo_identification/servo_half_revolution_sweep_log) |
+| Procedure | [`experiments/servo_identification/procedure.md`](procedure.md) |
 
 ---
 
@@ -76,7 +76,7 @@ This plot shows the counts-per-revolution estimate as a function of expected com
 
 ## 3. Static Command-to-Angle Map
 
-This section uses the static servo sweep data to identify the PWM-to-angle map over the control-relevant servo range. The angle conversion from Section 2 is used to convert encoder counts into servo angle.
+This section uses the static servo sweep data to identify the PWM-to-angle map over the control-relevant servo range. The angle conversion from [Section 2 — Encoder Count-to-Angle Calibration](#2-encoder-count-to-angle-calibration) is used to convert encoder counts into servo angle.
 
 ### Goal
 
@@ -221,10 +221,10 @@ $$
 
 ### Plots
 
-- `plots/system_identification/servo_identification/servo_step_response_test/step_response_command_vs_time.png`
-- `plots/system_identification/servo_identification/servo_step_response_test/step_response_measured_vs_command_angle.png`
-- `plots/system_identification/servo_identification/servo_step_response_test/step_response_case_overlays.png`
-- `plots/system_identification/servo_identification/servo_step_response_test/step_response_normalized_overlays.png`
+- [step\_response\_command\_vs\_time.png](../../plots/system_identification/servo_identification/servo_step_response_test/step_response_command_vs_time.png)
+- [step\_response\_measured\_vs\_command\_angle.png](../../plots/system_identification/servo_identification/servo_step_response_test/step_response_measured_vs_command_angle.png)
+- [step\_response\_case\_overlays.png](../../plots/system_identification/servo_identification/servo_step_response_test/step_response_case_overlays.png)
+- [step\_response\_normalized\_overlays.png](../../plots/system_identification/servo_identification/servo_step_response_test/step_response_normalized_overlays.png)
 
 ### Conclusion
 
@@ -250,23 +250,23 @@ This is conservative enough to capture the slower reversal behavior without over
 
 ### Goal
 
-Evaluate whether broadband PRBS excitation is the appropriate next step for dynamic servo identification, or whether targeted frequency excitation should be used based on the step-response results from Section 4.
+Evaluate whether broadband PRBS excitation is the appropriate next step for dynamic servo identification, or whether targeted frequency excitation should be used based on the step-response results from [Section 4 — Step-Response Results](#4-step-response-results).
 
 ### Result
 
 | Quantity | Value | Notes |
 |---|---:|---|
-| Step-response bandwidth estimate | ~3 Hz | Based on dominant actuator time constant from Section 4 |
+| Step-response bandwidth estimate | ~3 Hz | Based on dominant actuator time constant from [Section 4 — Step-Response Results](#4-step-response-results) |
 | Conservative time constant, $\tau$ | ~0.06 s | Captures slower cross-center reversal behavior |
 | Effective delay, $L$ | ~0.01 s | Small but relevant for higher-frequency phase lag |
 | PRBS use case | Exploratory only | Useful for quick input-output excitation, but frequency content is not directly controlled |
 | Preferred next test | PRPS / targeted multi-sine | Better for controlled excitation over the usable dynamics range |
-| Control-relevant fitting range | 0.15–3.05 Hz | Confirmed in Section 6; captures usable actuator dynamics without overfitting high-frequency behavior |
+| Control-relevant fitting range | 0.15–3.05 Hz | Confirmed in [Section 6 — Targeted PRPS / Multi-Sine Results](#6-targeted-prps--multi-sine-results); captures usable actuator dynamics without overfitting high-frequency behavior |
 | High-frequency fitting priority | Low | Frequencies beyond the actuator’s useful bandwidth are not control-relevant for this system |
 
 ### Rationale
 
-The step-response results from Section 4 indicate that the servo behaves approximately like a first-order actuator with a dominant time constant of roughly **0.05–0.06 s** and a small effective delay of approximately **0.01 s**. This corresponds to an approximate bandwidth on the order of **3 Hz**.
+The step-response results from [Section 4 — Step-Response Results](#4-step-response-results) indicate that the servo behaves approximately like a first-order actuator with a dominant time constant of roughly **0.05–0.06 s** and a small effective delay of approximately **0.01 s**. This corresponds to an approximate bandwidth on the order of **3 Hz**.
 
 Because the actuator has limited useful bandwidth, the next dynamic identification test should **focus on the frequency range that is relevant for control**. A broadband PRBS input can excite a wide range of frequencies, but it does not directly control the exact frequency content or emphasize the frequencies most important for actuator modeling. As a result, PRBS may encourage fitting behavior in frequency regions where the actuator has already lost authority or where delay dominates the response.
 
@@ -274,7 +274,7 @@ For this project, the more useful next step is targeted PRPS or multi-sine excit
 
 ### Conclusion
 
-Based on the step-response bandwidth estimate from Section 4, final servo dynamic identification proceeded with **targeted PRPS / multi-sine excitation** over 0.15–3.05 Hz. This deliberately targets the frequency range where the actuator has meaningful command authority — rather than fitting the widest possible band — producing a model directly useful for controller design. Results are in Section 6.
+Based on the step-response bandwidth estimate from [Section 4 — Step-Response Results](#4-step-response-results), final servo dynamic identification proceeded with **targeted PRPS / multi-sine excitation** over 0.15–3.05 Hz. This deliberately targets the frequency range where the actuator has meaningful command authority — rather than fitting the widest possible band — producing a model directly useful for controller design. Results are in [Section 6 — Targeted PRPS / Multi-Sine Results](#6-targeted-prps--multi-sine-results).
 
 ---
 
@@ -399,7 +399,7 @@ Training vs validation weighted error for all four candidate model types at amp1
 
 ### Conclusion
 
-PRPS excitation over 0.15–3.05 Hz shows that the servo retains full command authority (≤0.3 dB magnitude variation) across the entire test band. Phase lag is the binding limitation: ~45° is reached near **2 Hz** and ~56° at **3 Hz**. The first-order-plus-delay model structure is confirmed across all tested amplitudes, and the identified DC gain (K ≈ 0.00156 rad/µs) is consistent with the Section 3 static characterization to within 2%. Controller-design implications are discussed in Section 9.
+PRPS excitation over 0.15–3.05 Hz shows that the servo retains full command authority (≤0.3 dB magnitude variation) across the entire test band. Phase lag is the binding limitation: ~45° is reached near **2 Hz** and ~56° at **3 Hz**. The first-order-plus-delay model structure is confirmed across all tested amplitudes, and the identified DC gain (K ≈ 0.00156 rad/µs) is consistent with the [Section 3 — Static Command-to-Angle Map](#3-static-command-to-angle-map) static characterization to within 2%. Controller-design implications are discussed in [Section 9 — Controller-Design Implication](#9-controller-design-implication).
 
 ---
 
@@ -449,7 +449,7 @@ The selected model is **first-order plus delay** because adding a delay term is 
 
 ## 8. Validation
 
-Full validation detail — per-amplitude FRF error tables, model candidate comparisons, and time-domain simulation — is presented in Section 6.
+Full validation detail — per-amplitude FRF error tables, model candidate comparisons, and time-domain simulation — is presented in [Section 6 — Targeted PRPS / Multi-Sine Results](#6-targeted-prps--multi-sine-results).
 
 **Frequency-domain:** The global model scored against held-out seed-4005 files (one per amplitude, not used in fitting). Worst-case validation errors are 0.5 dB magnitude and 2.6° phase — acceptable for a first-order actuator model.
 

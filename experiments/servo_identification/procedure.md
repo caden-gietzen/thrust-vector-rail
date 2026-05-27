@@ -34,7 +34,7 @@ The final model should be simple enough to support controller design while still
 
 ## Control-Relevant Identification Philosophy
 
-The servo identification procedure follows the same general structure used for thrust identification:
+The servo identification procedure follows the same general structure used for [thrust identification](../thrust_identification/procedure.md):
 
 1. Begin with a static map.
 2. Use simple transient tests to understand dominant behavior.
@@ -43,7 +43,7 @@ The servo identification procedure follows the same general structure used for t
 
 The initial idea was to use step-response tests and pseudo-random binary sequence (PRBS) excitation. However, **PRBS excitation provides limited direct control over which frequencies are excited and with what strength**.
 
-After observing this limitation during actuator and thrust identification, the procedure shifted toward explicitly exciting selected frequencies that reveal the actuator's usable dynamic range. Since these open-loop actuator tests precede final controller design, the purpose is not to assume a rail-controller bandwidth in advance. Instead, the purpose is to **identify the frequency range over which the servo can still track commanded angle reliably enough to support closed-loop control**.
+After observing this limitation during actuator and [thrust identification](../thrust_identification/procedure.md), the procedure shifted toward explicitly exciting selected frequencies that reveal the actuator's usable dynamic range. Since these open-loop actuator tests precede final controller design, the purpose is not to assume a rail-controller bandwidth in advance. Instead, the purpose is to **identify the frequency range over which the servo can still track commanded angle reliably enough to support closed-loop control**.
 
 This actuator bandwidth estimate can then be used to inform the initial rail-controller bandwidth target.
 
