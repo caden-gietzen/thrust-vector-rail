@@ -17,7 +17,23 @@ $$\boxed{G_{thrust}(s) = \frac{0.00414}{\,0.0781\,s + 1\,} \cdot e^{-0.0252 s} \
 | $L$ (delay) | 25.2 ms |
 | Dominant bandwidth | 2.04 Hz (12.8 rad/s) |
 
-This is the **global first-order-plus-delay** fit over the full usable operating range (1100–1950 µs). It is used as the thrust plant model for: (1) initial rail-controller PID design, and (2) friction identification experiments (where thrust is an input and friction force is the target output). See Sections 4–5 for identification details and controller-design implications.
+This is the **global first-order-plus-delay** fit over the full usable operating range (1100–1950 µs). It is used as the thrust plant model for: (1) initial rail-controller PID design, and (2) friction identification experiments (where thrust is an input and friction force is the target output). See [Section 4 — Candidate Model Fits](#4-candidate-model-fits) and [Section 5 — Controller-Design Implications](#5-controller-design-implications) for identification details and controller-design implications.
+
+**Identified static thrust map — degree-4 polynomial (fit range 1100–1950 µs):**
+
+Let $\hat{u} = (u - 1525.0) / 256.2$ be the centered-and-scaled PWM command (µs). The static steady-state thrust is:
+
+$$\boxed{F_{ss}(\hat{u}) = 1.828\times10^{-5}\,\hat{u}^4 + 0.053686\,\hat{u}^3 + 0.17600\,\hat{u}^2 + 1.06699\,\hat{u} + 1.74620 \quad [\text{N}]}$$
+
+| Parameter | Value |
+|---|---:|
+| Normalization mean | 1525.0 µs |
+| Normalization std | 256.2 µs |
+| RMSE | 0.0234 N |
+| MAE | 0.0169 N |
+| Usable range | 1075–1950 µs → 0.23–4.17 N |
+
+Evaluate with `polyval([p4 p3 p2 p1 p0], (u_us - 1525.0) / 256.2)`. See [Section 2 — Static Thrust Map](#2-static-thrust-map) for polynomial model selection rationale and the degree-2 alternative.
 
 Initial conclusions from the static sweep:
 

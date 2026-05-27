@@ -1,2 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<MATLABProject xmlns="http://www.mathworks.com/MATLABProjectFile"/>
+<MATLABProject xmlns="http://www.mathworks.com/MATLABProjectFile">
+  <ProjectShortcuts/>
+  <ProjectPath>
+    <PathEntry>analysis/utils</PathEntry>
+  </ProjectPath>
+</MATLABProject>
