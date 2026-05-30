@@ -180,19 +180,24 @@ for k = 1:nRuns
         motionLabel(runs(k).is_motion));
 end
 
-% For each angle direction, find the stiction bracket.
-for sgn = [1, -1]
-    dirRuns = find(arrayfun(@(r) r.angle_sign == sgn && ~isnan(r.esc_us), runs));
-    if isempty(dirRuns); continue; end
+% For each unique angle value, find the stiction bracket.
+% Stiction breakaway is angle-dependent (F_rail = F_thrust * sin(theta)), so
+% runs must be grouped by angle, not just by direction sign.
+angle_degs_rounded = arrayfun(@(r) round(r.theta_cmd_deg), runs(1:nRuns));
+unique_angles = unique(angle_degs_rounded);
 
-    stiction_idxs = dirRuns(arrayfun(@(i) runs(i).is_stiction,  dirRuns));
-    motion_idxs   = dirRuns(arrayfun(@(i) runs(i).is_motion,    dirRuns));
+for ua = unique_angles(:)'
+    angleRuns = find(angle_degs_rounded == ua);
+    if isempty(angleRuns); continue; end
+
+    stiction_idxs = angleRuns(arrayfun(@(i) runs(i).is_stiction, angleRuns));
+    motion_idxs   = angleRuns(arrayfun(@(i) runs(i).is_motion,   angleRuns));
 
     if ~isempty(stiction_idxs)
         [~, im] = max(arrayfun(@(i) runs(i).esc_us, stiction_idxs));
         r_max_stiction = runs(stiction_idxs(im));
-        fprintf('\n  Direction %+.0f°: stiction confirmed at ESC ≤ %.0f µs\n', ...
-            sgn*20, r_max_stiction.esc_us);
+        fprintf('\n  Angle %+.0f°: stiction confirmed at ESC ≤ %.0f µs\n', ...
+            ua, r_max_stiction.esc_us);
         fprintf('    → F_thrust_ss ≤ %.4f N, F_rail ≤ %.4f N (below stiction threshold)\n', ...
             r_max_stiction.F_thrust_ss, r_max_stiction.F_rail_ss);
     end
@@ -200,8 +205,8 @@ for sgn = [1, -1]
     if ~isempty(motion_idxs)
         [~, im] = min(arrayfun(@(i) runs(i).esc_us, motion_idxs));
         r_min_motion = runs(motion_idxs(im));
-        fprintf('  Direction %+.0f°: first motion at ESC = %.0f µs\n', ...
-            sgn*20, r_min_motion.esc_us);
+        fprintf('  Angle %+.0f°: first motion at ESC = %.0f µs\n', ...
+            ua, r_min_motion.esc_us);
         fprintf('    → F_stiction ≈ %.4f N (F_rail at breakaway)\n', ...
             r_min_motion.F_rail_ss);
     end
@@ -402,7 +407,7 @@ fprintf('============================================================\n');
 % differs between the two traversal directions.
 
 dir_signs  = [1, -1];
-dir_labels = {'+20 deg', '-20 deg'};
+dir_labels = {'positive dir', 'negative dir'};
 b_dir      = nan(1,2);
 mu_dir     = nan(1,2);
 rmse_dir_v = nan(1,2);
@@ -562,7 +567,7 @@ for di = 1:2
 
     plot(v_range, b_vc * v_range + mu_vc * sgn_range, 'k-', 'LineWidth', 2, 'DisplayName', 'pooled fit');
     xlabel('Velocity (m/s)'); ylabel('F_{friction} (N)');
-    title(sprintf('Direction %+.0f°', sgn_d * 20));
+    title(sprintf('Direction: %s', dir_labels{di}));
     legend('show', 'Location', 'best');
     grid on;
 end
