@@ -108,19 +108,19 @@ $$
 
 | Parameter | Value | Source |
 |-----------|-------|--------|
-| $m$ | cart mass | to be measured |
-| $\tau_\theta$ | 24.4 ms | [PRPS servo identification](experiments/servo_identification/results.md) |
-| $L_\theta$ | 28.8 ms | [PRPS servo identification](experiments/servo_identification/results.md) |
-| $\tau_T$, $L_T$ | — | thrust identification pending |
-| $f_\text{friction}$ | — | friction identification pending |
+| $m$ | 0.4536 kg (1 lb nominal) | measured |
+| $\tau_\theta$ | 24.4 ms | [servo identification](experiments/servo_identification/results.md) |
+| $L_\theta$ | 28.8 ms | [servo identification](experiments/servo_identification/results.md) |
+| $\tau_T$ | 78.1 ms | [thrust identification](experiments/thrust_identification/results.md) |
+| $L_T$ | 25.2 ms | [thrust identification](experiments/thrust_identification/results.md) |
+| $\mu_c$ | 0.8158 N | [friction identification](experiments/friction_identification/procedure.md) — Coulomb-only model; 42% directional asymmetry observed |
 
 ### Current modeling assumptions
 
 - Motion is modeled along one rail axis only.
 - Servo angle and motor thrust are included as actuator states, not static mappings.
-- Friction is not ignored — it enters as an additive force term $f_\text{friction}$ to be identified from rail experiments.
-- The nominal model retains $\sin(\theta)$ to preserve nonlinear geometry; small-angle linearization may be applied later for LQR or frequency-domain design.
-- Thrust dynamics are not finalized and will be updated after thrust identification is validated.
+- Friction is modeled as a symmetric Coulomb term $f_\text{friction} = -\mu_c \operatorname{sign}(v)$ for initial controller design. A 42% directional asymmetry has been observed and is flagged as a refinement candidate.
+- The nominal model retains $\sin(\theta)$ to preserve nonlinear geometry; the controller design uses local linearization at chosen operating points.
 
 ### Why this matters
 
@@ -143,29 +143,55 @@ The project is organized around a repeatable controls-analysis workflow:
 
 ## Current Technical Focus
 
-The project is in the actuator characterization phase, progressing toward closed-loop controller implementation.
+The project has completed actuator characterization and is now in the controller design and simulation phase.
 
-**Completed:**
+### Completed Identification
 
-- encoder count-to-angle calibration (2400 counts/rev, <1% endpoint error)
-- static PWM-to-angle mapping for the servo actuator (neutral ~1431 µs, gain −0.00159 rad/µs)
-- servo step-response analysis (~3 Hz bandwidth, no overshoot, mild amplitude dependence)
-- servo PRPS frequency-domain identification over 0.15–3.05 Hz (four amplitudes, training and validation datasets)
-- servo transfer-function model selection and validation
+**Encoder calibration:**  64 810 counts/m (measured; nominal 60 000); <1% endpoint error. Details: [experiments/encoder_calibration/results.md](experiments/encoder_calibration/results.md).
 
-The selected servo model is a **first-order lag with transport delay**:
+**Servo actuator** — first-order lag with transport delay:
 
 $$
-G(s) = \frac{0.001556}{1 + 0.0244\,s}\,e^{-0.0288\,s} \quad [\text{rad}/\mu\text{s}]
+G_\theta(s) = \frac{0.001556}{1 + 0.0244\,s}\,e^{-0.0288\,s} \quad [\text{rad}/\mu\text{s}]
 $$
 
-Validation errors on held-out data: ≤ 0.5 dB magnitude, ≤ 2.6° phase. The servo cannot be approximated as an instantaneous actuator — the combined 53 ms lag constrains any rail controller to an initial bandwidth of ≤ 1 Hz.
+Validation errors ≤ 0.5 dB magnitude, ≤ 2.6° phase. The combined 53 ms lag (τ + L) constrains initial rail-controller bandwidth to ≤ 1 Hz. Details: [experiments/servo_identification/results.md](experiments/servo_identification/results.md).
 
-**In progress / next:**
+**Thrust actuator** — static map and PRPS dynamic identification over the full usable range (1075–1950 µs → 0.23–4.17 N):
 
-- friction and mechanical resistance identification
-- thrust actuator dynamic characterization
-- closed-loop rail-controller implementation and comparison
+$$
+G_T(s) = \frac{0.00414}{1 + 0.0781\,s}\,e^{-0.0252\,s} \quad [\text{N}/\mu\text{s}]
+$$
+
+The static map is nonlinear; a degree-4 polynomial captures it with RMSE = 0.023 N. Dynamic gain increases 91% from low to high operating point; delay is nearly constant at ≈25 ms across all regions. Details: [experiments/thrust_identification/results.md](experiments/thrust_identification/results.md).
+
+**Friction identification** — residual-based method using servo and thrust models applied to fixed-angle, stepped-ESC runs. Selected model is Coulomb-only (viscous term not significant):
+
+$$
+f_\text{friction}(v) = -\mu_c\operatorname{sign}(v), \quad \mu_c = 0.8158\,\text{N}
+$$
+
+RMSE = 0.24 N. A 42% directional asymmetry was observed (positive rail direction: $\mu = 0.56$ N; negative: $\mu = 0.86$ N) and is flagged for future refinement. See [experiments/friction_identification/procedure.md](experiments/friction_identification/procedure.md) for the full analysis method.
+
+### Controller Design (current phase)
+
+Controller design proceeds in simulation before hardware deployment. Two control architectures are in development:
+
+**LQR gain scheduling** — three simulation tiers of increasing scheduling complexity ([docs/gain_scheduling.md](docs/gain_scheduling.md)):
+
+| Tier | Strategy | Scheduling variable(s) | Simulink model |
+|------|----------|------------------------|----------------|
+| 1 | Fixed-gain LQR | none — single linearization at $\theta^* = 0$, $T^* = 2.574$ N | [fixed_lqr.slx](analysis/control_design/gain_scheduling/fixed_lqr.slx) |
+| 2 | Angle-scheduled LQR | $\theta^*$ grid over $[-60°, 60°]$ at nominal thrust | [theta_sched_lqr.slx](analysis/control_design/gain_scheduling/theta_sched_lqr.slx) |
+| 3 | Pair-scheduled LQR | $(\theta^*, T^*)$ grid — 25 × 7 = 175 gain matrices | [pair_sched_lqr.slx](analysis/control_design/gain_scheduling/pair_sched_lqr.slx) |
+
+The linearization structure is: $A$ is constant (independent of operating point); all operating-point dependence enters through $B(\theta^*, T^*)$. Tier 2 captures servo-authority variation with angle; Tier 3 additionally captures thrust-level scaling of $B_\theta = (T/m)\cos\theta$. Gain matrices are precomputed by [trim_analysis.m](analysis/control_design/gain_scheduling/trim_analysis.m) and saved as `.mat` files; [build_model.m](analysis/control_design/gain_scheduling/build_model.m) constructs the matching Simulink models programmatically.
+
+**PID position controller** — SISO loop that commands servo angle to regulate rail position, with thrust held at the nominal feedforward value (2.574 N). The Simulink model [position_pid.slx](analysis/control_design/pid_design/position_pid.slx) is built by [build_pid_model.m](analysis/control_design/pid_design/build_pid_model.m) and is tunable via MATLAB's PID Tuner app (target bandwidth 0.3–0.5 Hz). Serves as a performance baseline for the scheduled LQR variants.
+
+Both designs use the same nonlinear plant equations of motion (mass $m = 0.4536$ kg, Coulomb friction $\mu_c = 0.8158$ N, identified servo and thrust dynamics).
+
+**Next steps:** hardware deployment of controllers; closed-loop performance comparison; directional friction refinement if position errors are asymmetric.
 
 ## Candidate Control Methods
 
@@ -196,11 +222,17 @@ Controller performance will be evaluated using:
 ## Repository Structure
 
 ```
-firmware/     Embedded control and data-acquisition code
-analysis/     MATLAB and Python scripts for identification and validation
-data/         Experimental datasets
-docs/         Engineering notes, requirements, and reports
-plots/        Generated figures and model-comparison outputs
+firmware/                    Embedded control and data-acquisition code (MicroPython, RP2040)
+analysis/
+  system_identification/     MATLAB identification scripts (servo, thrust, friction)
+  control_design/
+    gain_scheduling/         LQR trim analysis, gain tables, Simulink models (Tiers 1–3)
+    pid_design/              PID position controller and Simulink model
+data/                        Experimental datasets (candidate/accepted/rejected/diagnostics)
+docs/                        Engineering notes, requirements, and design documentation
+experiments/                 Per-subsystem procedure, model selection, and results documents
+plots/                       Generated figures and model-comparison outputs
+tools/                       Python orchestration scripts (run_pico_and_pull.py)
 ```
 
 ## Tools and Technologies
@@ -230,4 +262,16 @@ Although the testbed is one-dimensional, it supports development of skills relev
 
 ## Current Status
 
-Servo actuator identification is complete with a validated first-order-plus-delay model. Friction and thrust identification are the next steps before closed-loop controller design. Detailed results and model parameters are documented in [experiments/servo_identification/results.md](experiments/servo_identification/results.md).
+| Phase | Status |
+|-------|--------|
+| Encoder calibration | **Complete** — 64 810 counts/m |
+| Servo identification | **Complete** — FOPD model, K = 0.001556 rad/µs, τ = 24.4 ms, L = 28.8 ms |
+| Thrust static map | **Complete** — degree-4 polynomial, 1075–1950 µs → 0.23–4.17 N |
+| Thrust dynamic identification | **Complete** — FOPD model, K = 0.00414 N/µs, τ = 78.1 ms, L = 25.2 ms |
+| Friction identification | **Complete** — Coulomb-only, μ_c = 0.8158 N; 42% directional asymmetry flagged |
+| LQR gain scheduling (simulation) | **In progress** — Tiers 1–3 precomputed; Simulink models built |
+| PID controller (simulation) | **In progress** — Simulink model built; awaiting PID Tuner session |
+| Hardware controller deployment | Pending simulation validation |
+| Directional friction refinement | Deferred — revisit if asymmetric position errors emerge |
+
+Detailed results and model parameters are in the [experiments/](experiments/) directory. Controller design documentation is in [docs/gain_scheduling.md](docs/gain_scheduling.md).
