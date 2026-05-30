@@ -71,7 +71,7 @@ def make_config():
         "SERVO_HARD_MIN_US": 1000,
         "SERVO_HARD_MAX_US": 2000,
         # From servo identification (experiments/servo_identification/results.md):
-        "SERVO_NEUTRAL_US": 1431,
+        "SERVO_NEUTRAL_US": 1350,
         "SERVO_DEG_PER_US": 0.091092,   # |static gain|, deg/µs
 
         # --------------------------------------------------------
