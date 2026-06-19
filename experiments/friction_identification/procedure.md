@@ -296,13 +296,17 @@ If $\mu / F_{rail,max}$ is large (> 0.1 relative to the 1.43 N maximum rail forc
 
 ## Current Status
 
-Firmware, orchestration, and analysis scripts are complete. All model parameters are plugged in.
+The campaign has been **run and analyzed** (multi-angle dataset, 2026-05-29); see
+[results.md](results.md) for the current best estimate and open questions. Firmware,
+orchestration, and analysis scripts are complete.
 
-**Before running the campaign:**
+Friction is **identified but not finalized** — the candidate runs have not been triaged into
+`accepted/`, and the model selection (Coulomb-only vs. viscous+Coulomb) is still open. The
+remaining steps to lock it in are listed in
+[results.md → Open items before friction is "earned"](results.md#open-items-before-friction-is-earned):
 
-1. Weigh the vehicle assembly; update `M_kg` in the MATLAB script header.
-2. Verify the Pico is connected and `encoder` C extension is loaded.
-3. Run a single segment with `--no-orchestrate` to confirm CSV columns and halt detection.
-4. Run the full 16-segment orchestrated campaign.
-5. Move accepted CSVs from `candidate/` to `accepted/` and run `analyze_friction_sweep.m`.
-6. Document results in `experiments/friction_identification/results.md`.
+1. Triage the 2026-05-29 candidate runs into `accepted/` / `rejected/`.
+2. Settle the friction model structure and grouping.
+3. Deconfound servo direction from motion direction in the asymmetry estimate.
+4. Decide on a direction-dependent model vs. a robust symmetric bound for the controller.
+5. Quantify stiction/breakaway explicitly.
