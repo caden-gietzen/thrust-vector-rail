@@ -199,9 +199,15 @@ cython_debug/
 slprj/
 *.slxc
 
+# Simulink model backups (local only)
+*.slx.original
+
 # Claude Code
 CLAUDE.md
 .claude/settings.local.json
+
+# Codex
+AGENTS.md
 
 # Auto-generated analysis reports (written by MATLAB analysis scripts)
 *.report.md
