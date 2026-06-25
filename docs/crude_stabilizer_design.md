@@ -210,8 +210,18 @@ Coulomb friction without letting the integrator dominate the delay-limited loop.
 
 The margin sweep in [init_stabilizer_bode.m](../tvr_stabilizer/init_stabilizer_bode.m)
 prints the ideal, rough-actuator, and implemented-loop margins for
-$\omega \in \{0.3,0.6,1.0,1.8,3.0,6.0\}$. The implemented-loop sweep motivates
-$\omega=0.6~\text{rad/s}$ as the first hardware candidate:
+$\omega \in \{0.3,0.6,1.0,1.8,3.0,6.0\}$. It then selects the **largest**
+$\omega$ whose implemented-loop row satisfies the first-hardware margin targets:
+
+$$
+f_c \le 0.30~\text{Hz},
+\qquad
+PM \ge 60^\circ,
+\qquad
+GM \ge 12~\text{dB}
+$$
+
+That encoded rule selects $\omega=0.6~\text{rad/s}$ as the first hardware candidate:
 
 | $\omega$ | $\omega_c$ | Crossover | Phase margin | Gain margin | Interpretation |
 |---:|---:|---:|---:|---:|---|
@@ -220,12 +230,91 @@ $\omega=0.6~\text{rad/s}$ as the first hardware candidate:
 | $1.8~\text{rad/s}$ | $\approx 5.70~\text{rad/s}$ | $\approx 0.91~\text{Hz}$ | $\approx 47^\circ$ | $\approx 13~\text{dB}$ | usable margin but too quick for first hardware |
 | $3.0~\text{rad/s}$ | $\approx 9.44~\text{rad/s}$ | $\approx 1.50~\text{Hz}$ | $\approx 31^\circ$ | $\approx 8~\text{dB}$ | too little margin |
 
+The velocity filter is treated as part of the implemented controller, not as a
+separate inner velocity loop. Its cutoff is chosen relative to the outer
+position-loop crossover because any filter lag appears inside the same return ratio used
+for the phase-margin check. A practical rule is
+
+$$
+\omega_{f,v} \ge 5\text{--}10\,\omega_c
+$$
+
+where $\omega_{f,v}$ is the velocity-filter cutoff and $\omega_c$ is the implemented-loop
+crossover. For the first hardware candidate, $\omega_c \approx 1.88~\text{rad/s}$. The
+current first-order velocity filter uses
+
+$$
+\tau_v = 0.01~\text{s}
+$$
+
+so
+
+$$
+\omega_{f,v} = \frac{1}{\tau_v} = 100~\text{rad/s}
+$$
+
+or
+
+$$
+f_{f,v} \approx 15.9~\text{Hz}
+$$
+
+This is about $53$ times the implemented-loop crossover. The filter therefore contributes
+only about
+
+$$
+-\tan^{-1}(\omega_c\tau_v) \approx -1.1^\circ
+$$
+
+of phase lag at crossover, so it does not materially erode the documented phase margin.
+The value can be lowered later if differentiated encoder noise dominates, but any change
+must be rechecked with [init_stabilizer_bode.m](../tvr_stabilizer/init_stabilizer_bode.m)
+or [loop_margin.m](../tvr_stabilizer/loop_margin.m).
+
+Friction is deliberately excluded from the small-signal loop-margin linearization.
+Gain margin and phase margin are properties of the local return ratio; Coulomb friction,
+stiction, saturation, and direction-dependent breakaway are nonlinear disturbance and
+authority limits, not clean multiplicative loop-gain changes. Including the current
+tanh-smoothed friction model in the linearization would make the result depend strongly
+on the artificial slope chosen near $v=0$ and would obscure the actuator-delay margin that
+the Bode check is meant to measure.
+
+That does **not** mean friction can be ignored when selecting the crude PID. The actual
+first-hardware choice is a balance between two tests:
+
+- the friction-off implemented-loop linearization must retain enough delay robustness;
+- the nonlinear closed-loop simulation used for PRPS and Monte Carlo validation must run
+  with friction enabled and show enough authority to move, track, and stay away from the
+  rail limits without sustained saturation.
+
+In other words, the Bode margin check answers "will this loop remain stable around the
+nominal operating point despite actuator lag and delay?" The nonlinear friction-enabled
+simulation answers "does this conservative loop have enough authority to be useful on the
+real rail?" If $\omega=0.6~\text{rad/s}$ is too sluggish to overcome friction, increasing
+to $\omega=1.0~\text{rad/s}$ is a legitimate trade: it spends some phase margin to buy
+low-speed authority. That decision should be made explicitly from the paired linear-margin
+and friction-enabled nonlinear results.
+
+If a candidate passes the friction-off return-ratio check but performs poorly with
+friction enabled, there are only two honest design moves. One is to make friction part of
+the control-oriented plant treatment, such as through an explicit friction feedforward,
+disturbance estimate, or revised nonlinear simulation model used during tuning. The other
+is to relax the first-hardware gain-margin and phase-margin targets enough to raise the
+PID gains. The second option is acceptable for a bootstrap controller only if the reduced
+margins are documented and the friction-enabled nonlinear simulations still show no rail
+limit violations or sustained actuator saturation.
+
 The acceptance targets for the first hardware stabilizer are:
 
 - crossover near $0.3~\text{Hz}$ or lower;
 - phase margin preferably at least $60^\circ$;
 - gain margin preferably at least $12~\text{dB}$;
-- no rail-limit violation or sustained servo saturation in nonlinear simulation.
+- PRPS reference components for closed-loop ID below the selected crossover, assigned in
+  [run_mc_campaign.m](../tvr_stabilizer/monte_carlo/run_mc_campaign.m);
+- enough commanded authority to move through the provisional friction model in nonlinear
+  PRPS simulation;
+- no rail-limit violation or sustained servo saturation in friction-enabled nonlinear
+  simulation.
 
 If the $\omega=0.6~\text{rad/s}$ controller is too sluggish to overcome friction and
 stiction in nonlinear simulation, the next candidate is $\omega=1.0~\text{rad/s}$. That
