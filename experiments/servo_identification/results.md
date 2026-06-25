@@ -527,6 +527,20 @@ $$
 | Explicit servo dynamics needed? | Yes |
 | Recommended initial controller BW | ≤ 1 Hz |
 
+---
+
+## 11. Bootstrap Parameter Uncertainty
+
+Beyond selecting the nominal first-order-plus-delay servo model, the PRPS training data were resampled with replacement to estimate uncertainty in $K$, $\tau$, and $L$. The procedure is documented in [Servo PRPS Bootstrap Uncertainty Procedure](bootstrap_uncertainty.md).
+
+The bootstrap uses the same model family selected in [Section 6 -- Targeted PRPS / Multi-Sine Results](#6-targeted-prps--multi-sine-results):
+
+$$
+G(s) = \frac{K}{1 + \tau s} e^{-Ls}
+$$
+
+The resulting parameter cloud is saved under [`plots/system_identification/servo_identification/servo_prps_log/bootstrap_fopd/`](../../plots/system_identification/servo_identification/servo_prps_log/bootstrap_fopd/) and is intended for downstream simulation sweeps and robustness checks. The full sample cloud should be preferred over independent parameter bounds because it preserves correlations between $K$, $\tau$, and $L$.
+
 ## Final Conclusion
 
 The servo actuator identification procedure produced a validated low-order actuator model suitable for initial rail-controller design. The servo behaves as a first-order lag with transport delay — consistent across all tested excitation amplitudes and confirmed by both frequency-domain PRPS fitting and time-domain simulation. The static gain agrees with the Section 3 command-to-angle map to within 2%, confirming internal consistency across all test methods.
