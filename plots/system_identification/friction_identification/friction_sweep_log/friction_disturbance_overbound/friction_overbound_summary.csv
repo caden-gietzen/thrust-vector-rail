@@ -1,0 +1,11 @@
+metric,value
+candidate_runs,18
+valid_residual_samples,2132
+positive_b_Ns_per_m,2.49703297547163
+positive_mu_N,0.861085233665676
+negative_b_Ns_per_m,2.35360429780731
+negative_mu_N,1.12502028890558
+pooled_rmse_N,0.436012383085572
+spatial_amplitude_abs_max_N,0.44030137639996
+stiction_breakaway_low_N,0.458499308343218
+stiction_breakaway_high_N,1.54605270885513

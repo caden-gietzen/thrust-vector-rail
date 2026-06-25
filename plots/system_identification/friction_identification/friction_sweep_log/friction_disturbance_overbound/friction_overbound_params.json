@@ -1,0 +1,79 @@
+{
+  "meta": {
+    "generated": "2026-06-23 10:38:04",
+    "source_data_dir": "C:/dev/thrust-vector-rail/data/raw/system_identification/friction_identification/friction_sweep_log/candidate",
+    "status": "provisional_candidate_overbound",
+    "note": "Use for controller V&V stress testing; this is not an earned friction model."
+  },
+  "dynamic": {
+    "nominal": {
+      "description": "direction-dependent fitted nominal",
+      "positive_direction": {
+        "b_Ns_per_m": 2.4970329754716332,
+        "mu_N": 0.86108523366567569
+      },
+      "negative_direction": {
+        "b_Ns_per_m": 2.3536042978073142,
+        "mu_N": 1.1250202889055774
+      }
+    },
+    "low": {
+      "description": "low friction stress case",
+      "positive_direction": {
+        "b_Ns_per_m": 1.9976263803773067,
+        "mu_N": 0.6409345454656955
+      },
+      "negative_direction": {
+        "b_Ns_per_m": 1.8828834382458515,
+        "mu_N": 0.90486960070559719
+      }
+    },
+    "high": {
+      "description": "high friction overbound using p95 residual padding",
+      "positive_direction": {
+        "b_Ns_per_m": 2.99643957056596,
+        "mu_N": 1.3013866100656359
+      },
+      "negative_direction": {
+        "b_Ns_per_m": 2.8243251573687771,
+        "mu_N": 1.5653216653055377
+      }
+    },
+    "asymmetric_worst": {
+      "description": "worst observed direction asymmetry plus residual padding",
+      "positive_direction": {
+        "b_Ns_per_m": 3.1212912193395415,
+        "mu_N": 1.5653216653055377
+      },
+      "negative_direction": {
+        "b_Ns_per_m": 1.7652032233554857,
+        "mu_N": 0.7510098895656856
+      }
+    }
+  },
+  "stiction": {
+    "breakaway_low_N": 0.45849930834321817,
+    "breakaway_high_N": 1.5460527088551319,
+    "v_epsilon_mps": 0.01,
+    "note": "Use high threshold for conservative breakaway stress tests."
+  },
+  "spatial": {
+    "bump_count_range": [
+      2,
+      5
+    ],
+    "amplitude_abs_max_N": 0.44030137639996031,
+    "amplitude_abs_p99_N": 2.0813702384060071,
+    "width_range_m": [
+      0.015,
+      0.08
+    ],
+    "position_range_m": [
+      -0.28611148827965882,
+      0.29435090664461261
+    ],
+    "seed": 1,
+    "percentile_basis": 95,
+    "note": "Gaussian bump amplitudes are bounded by residual-vs-position remainder after dynamic friction fit."
+  }
+}

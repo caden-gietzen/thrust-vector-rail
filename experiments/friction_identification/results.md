@@ -90,6 +90,35 @@ asymmetry is significant, so the stabilizer is designed against the high estimat
 
 ---
 
+## Friction disturbance overbound for V&V
+
+Because the crude stabilizer must be tested against stiction, asymmetry, and intermittent
+rail-position effects, a provisional simulation overbound was generated from the current
+`candidate/` friction data. The procedure is documented in
+[friction_disturbance_overbound.md](friction_disturbance_overbound.md), and the generated
+artifacts are saved under
+[`plots/system_identification/friction_identification/friction_sweep_log/friction_disturbance_overbound/`](../../plots/system_identification/friction_identification/friction_sweep_log/friction_disturbance_overbound/).
+
+The exported disturbance family has the form:
+
+$$
+F_\text{fric}(p, v, r) =
+-b_\pm(r)v
+-\mu_\pm(r)\operatorname{sign}(v)
+-F_\text{spatial}(p, r)
+$$
+
+with a separate stiction rule near $v = 0$. The current overbound uses 18 candidate runs and
+2132 valid residual samples. It exports low, nominal, high, and asymmetric-worst dynamic
+cases; a breakaway range of approximately $0.46$-$1.55$ N; and spatial bump realizations
+bounded by the residual-vs-position remainder.
+
+This artifact is for controller robustness testing only. It does not close the open
+friction-identification items below, and it should not be treated as an earned friction
+model.
+
+---
+
 ## Plots
 
 | Plot | File |

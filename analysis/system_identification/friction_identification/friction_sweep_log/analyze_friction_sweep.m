@@ -68,6 +68,7 @@ SIMPLICITY_TOLERANCE = 0.10;  % accept ≤10% worse RMSE to prefer simpler model
 scriptPath = mfilename('fullpath');
 repoRoot   = findRepoRoot(fileparts(scriptPath));
 plotDir    = getMirroredPlotDir(scriptPath);
+reportDir  = char(strrep(string(plotDir), string(fullfile(repoRoot, 'plots')), string(fullfile(repoRoot, 'reports'))));
 
 figNum = 0;
 
@@ -628,7 +629,11 @@ end
 
 %% Write Analysis Report
 
-reportPath = fullfile(plotDir, 'analyze_friction_sweep.report.md');
+if ~exist(reportDir, 'dir')
+    mkdir(reportDir);
+end
+
+reportPath = fullfile(reportDir, 'analyze_friction_sweep.report.md');
 writeAnalysisReport(reportPath, nRuns, selected_model, b_sel, mu_sel, rmse_sel, ...
     b_dir, mu_dir, rmse_dir_v, n_dir, dir_labels, ...
     b_lo, b_hi, mu_lo, mu_hi, M_kg, M_sigma_kg, dataDir, asym_flag);
