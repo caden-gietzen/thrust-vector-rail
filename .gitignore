@@ -197,6 +197,7 @@ cython_debug/
 
 # MATLAB Simulink generated build artifacts
 slprj/
+*.slxc
 
 # Claude Code
 CLAUDE.md
@@ -204,6 +205,11 @@ CLAUDE.md
 
 # Auto-generated analysis reports (written by MATLAB analysis scripts)
 *.report.md
+
+# Auto-generated Monte Carlo validation campaigns
+data/processed/controller_validation/tvr_stabilizer/monte_carlo/
+plots/controller_validation/tvr_stabilizer/monte_carlo/
+reports/controller_validation/tvr_stabilizer/monte_carlo/
 
 # Local daily notes (not shared)
 00_notes.md

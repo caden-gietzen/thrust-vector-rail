@@ -119,27 +119,51 @@ $$
 
 - Motion is modeled along one rail axis only.
 - Servo angle and motor thrust are included as actuator states, not static mappings.
-- Friction is carried as a provisional bound ($\mu_c \approx 1$ N, with a viscous term $b \approx 2.3$ N·s/m) for initial controller design; a ~30% directional asymmetry has been observed. Friction is the least-settled identification and is not yet finalized — see [experiments/friction_identification/results.md](experiments/friction_identification/results.md).
-- The nominal model retains $\sin(\theta)$ to preserve nonlinear geometry; the controller design uses local linearization at chosen operating points.
+- For the current crude stabilizer, **only servo angle is actively controlled**; thrust is held at a fixed feedforward operating point (effectively constant). Promoting thrust to a second controlled input is a later-phase extension.
+- Friction is **not modeled inside the crude-stabilizer control law**. It is treated as a bounded, worst-case *unmodeled disturbance*: the identification estimate ($\mu_c \approx 1$ N, viscous $b \approx 2.3$ N·s/m, ~30% directional asymmetry) sets the disturbance band, and the stabilizer is validated to behave well across that band plus parameter-uncertainty windows. Friction is the least-settled identification and is not yet finalized — see [experiments/friction_identification/results.md](experiments/friction_identification/results.md).
+- The nominal model retains $\sin(\theta)$ to preserve nonlinear geometry. The current crude PID stabilizer handles this geometry by **input/output (feedback) linearization applied globally** — it inverts the $F = T\sin(\theta)$ coupling so the loop sees an approximately linear plant across the whole envelope. Local linearization at chosen operating points enters later, with the gain-scheduled LQR designed as a comparison against this baseline.
 
 ### Why this matters
 
-This model connects the hardware testbed to flight-controls-style engineering: actuator dynamics, friction/disturbance modeling, frequency-domain system identification, model validation against experimental data, and model-based controller design — all on real hardware with real constraints.
+This model connects the hardware testbed to flight-controls-style engineering: actuator dynamics, friction and disturbance characterization, frequency-domain system identification, model validation against experimental data *and* against uncertainty sweeps, and model-based controller design — all on real hardware with real constraints.
 
-## Engineering Workflow
+## Engineering Pipeline
 
-The project is organized around a repeatable controls-analysis workflow:
+The project follows a deliberately staged pipeline in which each stage earns the right to the
+next. Nothing is trusted on hardware until it has been validated — first against data, and
+before any aggressive control authority, against uncertainty sweeps.
 
-```
-1. Design and instrument the testbed
-2. Collect experimental input/output data
-3. Process and organize accepted/rejected datasets
-4. Identify static and dynamic actuator models
-5. Validate models against separate datasets
-6. Select simplified models for controller design
-7. Implement and compare controllers on hardware
-8. Document assumptions, limitations, and results
-```
+1. **Plant model from first principles + open-loop system identification.** Derive the 1D
+   dynamics ($[p, v, \theta, T]$, coupling $F = T\sin\theta$, FODT actuators) and identify the
+   actuator subsystems on hardware — **servo and thrust dynamics done**, friction still being
+   finalized. At this stage **thrust is held at a fixed feedforward operating point (treated as
+   constant), not yet a controlled input**, and friction is carried only as a bounded
+   worst-case disturbance rather than a modeled term.
+2. **Rough nominal model.** Consolidate the identified subsystems into a single rough truth
+   model ([docs/rough_truth_model.md](docs/rough_truth_model.md)) — good enough to design
+   against, not yet trusted.
+3. **Crude stabilizer, validated under uncertainty (current).** Design a robust hand-tuned PID
+   (global I/O linearization) in simulation. Before ever closing the loop on hardware, validate
+   it across **parameter-uncertainty windows and worst-case friction/disturbance** to nearly
+   guarantee decent behavior — no intense oscillations or hunting. Simulation also exercises the
+   stabilizer against the **PRPS perturbations / reference excitation that will be injected into
+   the feedback loop for closed-loop ID**, so that the excitation itself is known to be safe to
+   run on the rail.
+4. **Closed-loop identification → earned model.** With the rail safely stabilized, run
+   closed-loop ID to produce a more trustworthy model — one *earned* against the real system.
+5. **Aggressive control + estimation against the earned model.** Design gain-scheduled LQR
+   (with local linearization as the comparison to the crude global-I/O baseline), promote
+   thrust to a controlled input, add model-error modeling and EKF/LQG estimation. Validate the
+   controller **and** the estimator rigorously in simulation — including uncertainty / Monte
+   Carlo sweeps — **before ever closing the loop on real hardware**.
+6. **Hardware deployment / HIL.** Hand the fully validated stack control authority over the
+   real rail.
+
+### Why staged this way
+
+> You cannot estimate or control what you cannot model, and you cannot trust a model you have
+> not validated against the real thing — or, before you reach hardware, against uncertainty
+> sweeps.
 
 ## Current Technical Focus
 
@@ -147,7 +171,7 @@ Open-loop actuator and friction identification is complete (servo, thrust, frict
 friction still being finalized). The conclusions are consolidated into a single
 hardware-identified plant: [docs/rough_truth_model.md](docs/rough_truth_model.md).
 
-The project is now at the **closed-loop ID bootstrap** step of Phase 1: design a **crude,
+The project is now at the **closed-loop ID** step of Phase 1: design a **crude,
 robust hand-tuned PID stabilizer** against the rough truth model so the rail can be run
 safely in closed loop, then collect closed-loop ID data to *earn* a refined model. Heavier
 control design (gain-scheduled LQR, EKF, LQG, Monte Carlo V&V) is deliberately deferred to
