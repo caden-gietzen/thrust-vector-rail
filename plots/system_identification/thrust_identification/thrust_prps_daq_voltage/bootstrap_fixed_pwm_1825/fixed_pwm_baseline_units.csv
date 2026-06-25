@@ -1,0 +1,7 @@
+unit_id,split,source_file,run_name,prps_seed,phase,pwm_us,segment_sample_count,tail_sample_count,force_mean_N,force_std_N,force_min_N,force_max_N,voltage_mean_V,voltage_min_V,voltage_max_V,current_mean_A
+train_seed2001_baseline_pre,train,2026_05_20_thrust_prps_daq_voltage_local_1700_1950_seed2001_00.csv,local_1700_1950,2001,baseline_pre,1825,143,40,3.238860475,0.0363434653153433,3.177117,3.321544,11.4461,11.444,11.45,NaN
+train_seed2001_baseline_post,train,2026_05_20_thrust_prps_daq_voltage_local_1700_1950_seed2001_00.csv,local_1700_1950,2001,baseline_post,1825,142,40,3.10704285,0.0788740670353372,2.965558,3.209538,11.209425,11.201,11.223,NaN
+train_seed2002_baseline_pre,train,2026_05_20_thrust_prps_daq_voltage_local_1700_1950_seed2002_00.csv,local_1700_1950,2002,baseline_pre,1825,143,40,3.051483675,0.0295586385519616,2.990191,3.104797,11.12175,11.111,11.13,NaN
+train_seed2002_baseline_post,train,2026_05_20_thrust_prps_daq_voltage_local_1700_1950_seed2002_00.csv,local_1700_1950,2002,baseline_post,1825,145,40,2.933002725,0.0829661243192874,2.779222,3.05704,10.8903,10.886,10.905,NaN
+validation_seed2003_baseline_pre,validation,2026_05_20_thrust_prps_daq_voltage_local_1700_1950_seed2003_00.csv,local_1700_1950,2003,baseline_pre,1825,143,40,2.9102753,0.0217838524779133,2.86897,2.952029,10.81795,10.811,10.823,NaN
+validation_seed2003_baseline_post,validation,2026_05_20_thrust_prps_daq_voltage_local_1700_1950_seed2003_00.csv,local_1700_1950,2003,baseline_post,1825,142,40,2.932601575,0.0433389503232651,2.849971,3.012097,10.638675,10.635,10.642,NaN

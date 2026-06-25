@@ -375,6 +375,32 @@ Given the servo bandwidth (≈ 1 Hz dominant, 0.1 Hz initial controller target f
 
 ---
 
+## 6. Fixed-PWM Thrust Uncertainty
+
+Because the crude stabilizer holds thrust fixed, uncertainty was also quantified at the intended feedforward command rather than only through the dynamic thrust model. The selected fixed command is:
+
+$$
+u_T^\ast = 1825~\mu\text{s}
+$$
+
+The analysis uses the `baseline_pre` and `baseline_post` segments from the accepted `local_1700_1950` PRPS files, where the center command is 1825 $\mu$s. The procedure is documented in [Fixed-PWM Thrust Uncertainty Procedure](fixed_pwm_uncertainty.md).
+
+This fixed-PWM analysis is intentionally separate from the FOPD dynamic model:
+
+$$
+G_T(s) = \frac{K_T}{1 + \tau_T s}e^{-L_Ts}
+$$
+
+For the rough PID phase, the useful quantity is the thrust magnitude actually produced by the fixed command:
+
+$$
+T^\ast = F_{ss}(1825~\mu\text{s})
+$$
+
+The generated report and sample files are saved under [`plots/system_identification/thrust_identification/thrust_prps_daq_voltage/bootstrap_fixed_pwm_1825/`](../../plots/system_identification/thrust_identification/thrust_prps_daq_voltage/bootstrap_fixed_pwm_1825/). Because only six baseline units are available, the raw observed thrust envelope should be treated as the conservative design range, while the bootstrap distribution summarizes how those observed units reweight the mean.
+
+---
+
 ## Current Status
 
 | Step | Status |
