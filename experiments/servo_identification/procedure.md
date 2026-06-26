@@ -2,377 +2,160 @@
 
 ## Objective
 
-Identify a low-order dynamic model for the servo actuator mapping from commanded servo input to measured physical servo angle:
+Identify a low-order dynamic model for the servo actuator mapping commanded servo input to measured physical servo angle:
 
 $$
-\theta_{cmd} \rightarrow \theta
+u_{servo} \rightarrow \theta
 $$
 
-where:
+where $u_{servo}$ is the commanded PWM pulse width (µs) sent to the servo and $\theta$ is the physical servo angle inferred from encoder motion.
 
-- $\theta_{cmd}$ is the commanded servo angle, or the equivalent pulse-width modulation (PWM) command sent from the Raspberry Pi Pico.
-- $\theta$ is the measured physical servo angle inferred from encoder motion.
-
-The purpose of this procedure is to **identify the servo actuator's usable dynamic range before final rail-controller design**. Since the controller bandwidth has not yet been selected, these open-loop tests are used to determine the frequency range over which the servo can reliably track commanded angle with acceptable gain, phase lag, delay, repeatability, and coherence.
-
-This makes the identification **control-relevant without assuming the final controller bandwidth in advance**. The resulting actuator model will be used to inform the initial rail-controller bandwidth target and determine whether the servo can be treated as an instantaneous command-to-angle mapping or must be included explicitly as an actuator dynamic.
-
-The goal is to characterize the servo behavior that matters for rail control, including:
-
-- static command-to-angle mapping
-- dominant actuator lag
-- effective input/output delay
-- usable actuator bandwidth
-- saturation limits
-- rate limits or slew-rate behavior
-- repeatability and hysteresis
-- whether servo dynamics must be included explicitly in the rail control model
-
-The final model should be simple enough to support controller design while still capturing the dominant actuator behavior that constrains closed-loop performance.
+The deliverable is a control-relevant truth-model subsystem **with quantified uncertainty**: a first-order-plus-delay transfer function, the frequency band over which it is trustworthy, and parameter confidence intervals. Those CIs *are* the Stage 2 uncertainty set — see [project_metrics.md §1](../../docs/project_metrics.md#1-open-loop-actuator-identification-servo-thrust-friction). The model also decides whether the servo can be treated as an instantaneous command-to-angle map or must enter the rail model as an explicit actuator state.
 
 ---
 
-## Control-Relevant Identification Philosophy
+## Identification Strategy: PRPS-primary, step-as-recon-and-validity
 
-The servo identification procedure follows the same general structure used for [thrust identification](../thrust_identification/procedure.md):
+The servo is identified with two excitation types doing **two different jobs**.
 
-1. Begin with a static map.
-2. Use simple transient tests to understand dominant behavior.
-3. Apply broadband excitation.
-4. Refine the excitation method toward frequencies that are most relevant for control.
+### PRPS is the identification workhorse
 
-The initial idea was to use step-response tests and pseudo-random binary sequence (PRBS) excitation. However, **PRBS excitation provides limited direct control over which frequencies are excited and with what strength**.
+Targeted pseudo-random phase-sum (PRPS) multisine excitation,
 
-After observing this limitation during actuator and [thrust identification](../thrust_identification/procedure.md), the procedure shifted toward explicitly exciting selected frequencies that reveal the actuator's usable dynamic range. Since these open-loop actuator tests precede final controller design, the purpose is not to assume a rail-controller bandwidth in advance. Instead, the purpose is to **identify the frequency range over which the servo can still track commanded angle reliably enough to support closed-loop control**.
+$$
+u(t) = u_0 + \sum_{k=1}^{N} A_k \sin(2\pi f_k t + \phi_k),
+$$
 
-This actuator bandwidth estimate can then be used to inform the initial rail-controller bandwidth target.
+is the **sole source of the model parameters $K, \tau, L$ and of every acceptance metric** in [project_metrics.md §1](../../docs/project_metrics.md#1-open-loop-actuator-identification-servo-thrust-friction). It concentrates excitation power at deliberately chosen frequencies across the band being identified, so coherence and SNR are highest exactly where the model is fit. Critically, only PRPS produces the two **gating** quantities:
 
-For that reason, the preferred dynamic identification method is not generic broadband PRBS testing. **Instead, the preferred approach is targeted frequency excitation using pseudo-random phase-sum (PRPS) signals**.
+- **FRF coherence $\gamma^2(\omega)$** — defines the frequency band that may be trusted and handed to Stages 2 and 4.
+- **Parameter confidence intervals** on $K, \tau, L$ (via bootstrap resampling) — the Stage 2 uncertainty set.
 
-This makes the identification more useful for controller design because the model is fit and validated over the frequency range where the actuator dynamics actually affect the closed-loop rail system, rather than chasing high-frequency fit quality in regions that are not control-relevant or are already dominated by actuator lag, delay, and attenuation.
+PRBS was considered and rejected: a binary sequence spreads energy across a band with no control over which frequencies receive it, encouraging fit in regions where the actuator has already lost authority.
+
+### Step / large-signal tests: recon and validity
+
+The step response runs **first** and does two jobs — neither of which is estimating $K, \tau, L$.
+
+**Recon — locate the band.** A targeted multisine cannot be designed without first knowing roughly where the dynamics live. A step gives an order-of-magnitude corner frequency $f_c \approx 1/(2\pi\tau)$ and the rough delay scale, which is all that is needed to center the PRPS experiment. A coarse $\tau$ from a rise time is fine for *pointing the experiment*; it is not fine for the reported parameter.
+
+**Validity — bound the nonlinearities.** Step and large-reversal tests expose the effects a linear FRF structurally cannot reveal: slew / rate limiting (reversal steps slower than center-out steps), deadband and backlash near center, and large-reversal directional asymmetry. Their output is an **operating-envelope of validity** for $G(s)$ — the command-excursion and rate limits within which the linear model holds — not transfer-function parameters.
+
+The reported $\tau, L$ never come from a step: a rise time conflates delay, lag, and slew, $t_r \approx L + \tau + (\text{slew})$, so $t_r \approx 2.2\tau$ inflates $\tau$. Step recon points the PRPS experiment; PRPS produces the numbers.
 
 ---
 
 ## Hardware Setup
 
-The servo identification setup uses:
-
-- servo actuator
-- quadrature encoder
-- Raspberry Pi Pico
-- GT2 belt and pulley transmission
-- mechanical linkage between servo motion and encoder measurement
-
-Servo commands are applied through PWM from the Raspberry Pi Pico. The resulting servo motion is measured using the encoder and converted from encoder counts to physical angle.
+Servo driven by 50 Hz PWM from the Raspberry Pi Pico (GP15); motion measured through a GT2 belt/pulley transmission by the quadrature encoder. Encoder counts are converted to angle by the calibration below.
 
 ---
 
-## Measurement Calibration
+## Procedure Steps
 
-The encoder measurement must be converted from counts to physical servo angle.
+### 1. Encoder count-to-angle calibration
 
-Possible conversion methods include:
+Establish $N_{enc} \rightarrow \theta$ experimentally rather than from nominal geometry, to absorb pulley, belt-tension, and backlash error. A half-revolution sweep with repeated up/down passes checks repeatability and counts/rev.
 
-- encoder counts per revolution
-- measured angular span over a known motion range
-- belt/pulley geometry using the GT2 belt and 20-tooth pulley
-- experimental calibration between commanded servo motion and measured encoder counts
+### 2. Static command-to-angle map
 
-Because pulley geometry, belt tension, backlash, and mechanical coupling may introduce small errors, the preferred method is **experimental calibration rather than relying only on nominal geometry**.
-
-The calibration procedure should establish a mapping:
+Sweep commanded PWM across the control-relevant range, letting the servo settle at each point, and fit
 
 $$
-N_{enc} \rightarrow \theta
+\theta_{ss} \approx K_\theta (u_{servo} - u_0).
 $$
 
-where:
+Identifies static gain $K_\theta$, neutral command $u_0$, usable range, deadband, and up/down hysteresis. The static gain is an **independent cross-check** on the PRPS DC gain $K$.
 
-- $N_{enc}$ is encoder count displacement
-- $\theta$ is physical servo angle
+### 3. Step-response recon and validity
 
-The resulting calibration should be checked for:
+Run center-out steps (small and moderate) and full cross-center reversals. Two outputs, neither of which is a fitted parameter:
 
-- linearity
-- repeatability
-- direction-dependent differences
-- backlash or deadband
-- usable angular range
+- **Recon:** an order-of-magnitude corner frequency $f_c \approx 1/(2\pi\tau)$ and rough delay scale, used only to center the PRPS band in step 4.
+- **Validity envelope:** slew / rate behavior, deadband, saturation, and large-reversal asymmetry as **envelope bounds** on where the linear model holds.
 
----
+### 4. PRPS frequency-domain identification (primary)
 
-## Static Command-to-Angle Identification
+Center the excitation band on the corner located in step 3 — span roughly a decade below to a half-decade above it, log-spaced — and push the upper edge until coherence degrades or motion approaches the encoder noise floor. That coherence falloff *is* the measured edge of the servo's usable dynamic range; it is not assumed in advance. (Sampling rate sets only the hard Nyquist ceiling; the band is set by where the actuator's own dynamics and SNR die, not by Nyquist.)
 
-The first identification step is a **static map from command to measured steady-state angle**.
-
-For a sequence of commanded PWM values or commanded angles, the servo is allowed to settle, and the final encoder-derived angle is recorded.
-
-The static map identifies:
-
-- command-to-angle gain
-- neutral or center command
-- angular saturation limits
-- deadband near center
-- asymmetry between positive and negative deflection
-- hysteresis between increasing and decreasing command sweeps
-
-The static mapping can be written as:
-
-$$
-\theta_{ss} = f(\theta_{cmd})
-$$
-
-or, if approximately linear over the usable range:
-
-$$
-\theta_{ss} \approx K_{\theta}(\theta_{cmd} - \theta_{0})
-$$
-
-where:
-
-- $\theta_{ss}$ is the measured steady-state servo angle
-- $\theta_{cmd}$ is the commanded servo input
-- $K_{\theta}$ is the static command-to-angle gain
-- $\theta_{0}$ is the command corresponding to zero or neutral angle
-
-This static map defines the usable operating range for the dynamic tests.
-
----
-
-## Step-Response Tests
-
-Step commands are used as the first dynamic test because they provide a direct way to observe the dominant actuator behavior.
-
-Step-response tests are used to estimate:
-
-- effective delay
-- rise time
-- settling time
-- dominant time constant
-- overshoot
-- saturation behavior
-- rate limiting or slew-rate behavior
-
-A candidate low-order model is:
-
-$$
-\frac{\theta(s)}{\theta_{cmd}(s)} =
-\frac{K e^{-Ls}}{\tau s + 1}
-$$
-
-where:
-
-- $K$ is the steady-state gain from command to angle
-- $L$ is the effective delay
-- $\tau$ is the dominant time constant
-- $s$ is the Laplace-domain complex frequency variable
-
-The step tests are not expected to fully define the final model by themselves. Their main purpose is to **reveal the rough actuator time scale**, expose nonlinear effects, and guide the design of later frequency-excitation tests.
-
-Important observations from step testing should include:
-
-- whether the servo behaves approximately like a first-order lag
-- whether delay is significant relative to the desired control-loop period
-- whether motion is rate-limited for large steps
-- whether small steps behave differently from large steps
-
----
-
-## Initial PRBS Testing
-
-A pseudo-random binary sequence (PRBS) was initially considered for dynamic servo identification.
-
-PRBS excitation is useful because it can excite a broad range of frequencies in a single experiment. However, for this project, PRBS was found to have an important limitation: **it provides limited direct control over the exact frequency content being excited**.
-
-For actuator modeling, this matters because the objective is not simply to identify the servo over the widest possible frequency range. The objective is to identify the servo over the frequency range that will matter for rail control.
-
-Therefore, PRBS is useful as an exploratory test, but it is not the preferred final identification method.
-
-PRBS testing may still be used to estimate:
-
-- approximate actuator bandwidth
-- rough delay effects
-- whether the actuator behaves like a low-order system
-- whether there are unexpected resonances or nonlinear effects
-
-However, final model fitting should prioritize the actuator's usable dynamic range.
-
----
-
-## Targeted Frequency Excitation
-
-After the limitations of PRBS excitation were identified, the procedure shifted toward explicitly exciting selected frequencies.
-
-The preferred test signal is a pseudo-random phase-sum (PRPS) or multi-sine command of the form:
-
-$$
-u(t) = u_{0} + \sum_{k=1}^{N} A_k \sin(2\pi f_k t + \phi_k)
-$$
-
-where:
-
-- $u(t)$ is the commanded servo input
-- $u_{0}$ is the center command
-- $A_k$ is the amplitude of the $k^{\text{th}}$ frequency component
-- $f_k$ is the $k^{\text{th}}$ excitation frequency
-- $\phi_k$ is a randomized phase
-- $N$ is the number of excited frequencies
-
-This approach gives direct control over the frequencies used for identification.
-
-Because these tests precede final controller design, the selected excitation frequencies should first be used to **identify the servo actuator's usable dynamic range**. The frequency range should begin where the servo behaves approximately like a static command-to-angle map and extend through the region where magnitude roll-off, phase lag, delay, loss of coherence, rate limiting, or saturation make the actuator less useful for closed-loop control.
-
-The goal is **not** to chase high-frequency model fit quality beyond the actuator's useful range. The goal is to determine the range over which commanded servo angle is tracked reliably enough that the actuator can support rail control.
-
-This identified actuator range will later inform the initial controller bandwidth and determine whether the servo can be modeled as an instantaneous input or must be included as an explicit actuator dynamic.
-
-As an initial practical guideline, the excitation range should extend at least through the first frequency region where one or more of the following occurs:
-
-- measured magnitude drops by approximately 3 dB from the low-frequency gain
-- measured phase lag approaches approximately 45 degrees
-- coherence becomes too low for a reliable frequency-response estimate
-- measured servo motion becomes small relative to encoder noise
-- the servo exhibits clear rate limiting, saturation, or nonlinear behavior
-- repeated trials no longer produce consistent output behavior
-
-These thresholds are not treated as hard pass/fail rules. They are used as practical markers for identifying where the servo begins to lose useful dynamic authority.
-
-Targeted frequency excitation is used to estimate:
-
-- frequency response
-- actuator bandwidth
-- phase lag
-- effective delay
-- gain roll-off
-- model fit quality over the actuator's usable dynamic range
+Apply PRPS at **multiple amplitudes** (to expose amplitude-dependent dynamics) and **multiple phase seeds** (to separate repeatability from one lucky fit), reserving held-out seeds per amplitude for validation. From each run estimate the empirical FRF and coherence; fit candidate low-order models; select the lowest-order model that captures the dominant behavior. Bootstrap the training FRFs to obtain parameter CIs.
 
 ---
 
 ## Model Candidates
 
-Candidate models should be kept intentionally low order.
+Kept intentionally low order; the selected model is the simplest that captures the dominant servo behavior affecting rail control.
 
-### Static Map Only
+| Model | Form | Use when |
+|---|---|---|
+| Static map | $\theta \approx f(u_{servo})$ | Servo bandwidth $\gg$ rail bandwidth; lag and delay negligible |
+| First-order | $\dfrac{K}{1 + \tau s}$ | Dominant lag, negligible delay |
+| First-order + delay | $\dfrac{K}{1 + \tau s}\,e^{-Ls}$ | Dominant lag **and** meaningful transport delay |
+| Second-order (+ delay) | $\dfrac{K\omega_n^2}{s^2 + 2\zeta\omega_n s + \omega_n^2}$ | Overshoot/resonance the first-order form cannot capture — only if data clearly justifies it |
 
-If the servo bandwidth is much higher than the rail control bandwidth, the actuator may be approximated as instantaneous:
-
-$$
-\theta(t) \approx f(\theta_{cmd}(t))
-$$
-
-This is the simplest possible model and is acceptable only if servo delay and lag are negligible relative to the rail control loop.
-
-### First-Order Model
-
-If the servo has a dominant lag but delay is small:
-
-$$
-\frac{\theta(s)}{\theta_{cmd}(s)} =
-\frac{K}{\tau s + 1}
-$$
-
-### First-Order Plus Delay Model
-
-If the servo has both dominant lag and meaningful delay:
-
-$$
-\frac{\theta(s)}{\theta_{cmd}(s)} =
-\frac{K e^{-Ls}}{\tau s + 1}
-$$
-
-### Second-Order Model
-
-If the servo response shows overshoot, resonance, or behavior that cannot be captured by a first-order lag:
-
-$$
-\frac{\theta(s)}{\theta_{cmd}(s)} =
-\frac{K \omega_n^2}
-{s^2 + 2\zeta \omega_n s + \omega_n^2}
-$$
-
-where:
-
-- $\omega_n$ is the natural frequency
-- $\zeta$ is the damping ratio
-
-A second-order model should only be used if the data clearly justifies the added complexity.
-
----
-
-## Model Selection Criteria
-
-Candidate models are compared based on:
-
-- prediction accuracy
-- ability to capture delay and lag
-- accuracy over the actuator's usable dynamic range
-- physical interpretability
-- low model order
-- usefulness for controller design
-- validation performance on separate data
-
-The preferred model is the **lowest-order model that captures the dominant servo behavior affecting rail control**.
-
-A model that fits high-frequency behavior but adds unnecessary complexity outside the actuator's usable dynamic range should not be preferred over a simpler model that captures the dynamics that will realistically constrain rail-controller design.
+Selection criteria: validation accuracy over the usable band, ability to capture delay and lag, physical interpretability, and parsimony. A model that fits high-frequency behavior outside the usable band is not preferred over a simpler one that captures the control-relevant dynamics.
 
 ---
 
 ## Key Design Question
 
-The main design question is whether the servo can eventually be treated as an instantaneous command-to-angle mapping for the rail controller, or whether servo dynamics must be included explicitly in the rail model.
-
-Because final controller design has not yet been completed, these tests first identify the actuator's usable dynamic range. The resulting bandwidth, delay, phase lag, and rate-limit information will then be used to choose an initial rail-controller bandwidth and decide whether a static actuator approximation is acceptable.
-
-If the servo bandwidth is much higher than the rail control bandwidth, then a static command-to-angle approximation may be acceptable.
-
-If servo lag, delay, saturation, or rate limits are significant relative to the rail control loop, then the servo should be modeled as an actuator dynamic state.
-
-In that case, the rail model should include servo dynamics such as:
+Can the servo be treated as an instantaneous command-to-angle map, or must its dynamics enter the rail model explicitly? If servo bandwidth $\gg$ rail bandwidth and delay is negligible, the static approximation is acceptable. Otherwise the servo enters the plant as an actuator state,
 
 $$
-\dot{\theta} =
-\frac{1}{\tau}
-\left(
-K\theta_{cmd} - \theta
-\right)
-$$
-
-or, with delay handled separately:
-
-$$
-\theta(s) =
-\frac{K e^{-Ls}}{\tau s + 1}\theta_{cmd}(s)
+\dot{\theta} = -\frac{1}{\tau}\theta + \frac{K}{\tau}\,u_{servo}(t - L).
 $$
 
 ---
 
 ## Expected Output
 
-The final servo identification results should include:
+1. Encoder count-to-angle calibration.
+2. Static command-to-angle map: gain, neutral, usable range, hysteresis.
+3. PRPS FRF and coherence across amplitudes; selected low-order model.
+4. Parameter values **with confidence intervals** for $K, \tau, L$ (bootstrap cloud), and the derived **bandwidth confidence interval / Bode envelope**.
+5. Step / large-signal validity envelope: slew rate, deadband, saturation, reversal asymmetry.
+6. Decision on static vs. explicit actuator dynamics, and initial rail-controller bandwidth recommendation.
 
-1. Static command-to-angle map
-2. Usable command range
-3. Saturation limits
-4. Hysteresis or repeatability assessment
-5. Step-response plots
-6. Estimated rise time, settling time, delay, and time constant
-7. Frequency-response estimate from targeted excitation
-8. Candidate model comparison
-9. Final selected low-order actuator model
-10. Decision on whether servo dynamics must be included in the rail control model
+---
+
+## Uncertainty Quantification
+
+A single best-fit model is not a deliverable on its own — Stage 2 needs the *uncertainty set*, not a point. Uncertainty is quantified by **Monte-Carlo-style bootstrap resampling of the PRPS dataset**: repeatedly draw synthetic training sets, refit the same model family, and accumulate the resulting parameter distribution. Full mechanics, units, and outputs are in [bootstrap_uncertainty.md](bootstrap_uncertainty.md); the essentials:
+
+1. **Resample units with replacement.** The unit is one complete PRPS period (`period_index`), so draws never cut through an excitation cycle. Sampling is **stratified by amplitude** so each synthetic set preserves the original amplitude mix.
+2. **Refit, don't re-select.** Each draw refits the already-selected model family — model *structure* is fixed; only the *parameters* move.
+3. **Score on fixed held-out data.** Every draw is validated against the same reserved seeds, and unphysical/failed fits are flagged and excluded from summary percentiles.
+4. **Keep the full correlated cloud.** The output is the joint $(K, \tau, L)$ sample cloud, not three independent intervals — downstream Monte Carlo must sweep whole sample rows to preserve the $K$–$\tau$–$L$ correlation.
+
+**Parameter CIs** (metric #6 below) are read directly off this cloud as percentile intervals.
+
+**Bandwidth confidence interval / cloud.** Because actuator bandwidth is a deterministic function of the parameters, propagating each cloud sample through the bandwidth expression yields a **distribution of bandwidth estimates** — a CI on usable bandwidth rather than a single number. Each $(K, \tau, L)$ draw maps to a −3 dB magnitude bandwidth and a phase-limited (~45°) bandwidth; the spread across the cloud is reported as the bandwidth confidence interval and visualized as a **Bode envelope** (the band swept by the cloud's frequency responses).
+
+---
+
+## Validation and Acceptance Criteria
+
+This section binds the procedure to [project_metrics.md §1](../../docs/project_metrics.md#1-open-loop-actuator-identification-servo-thrust-friction). The servo model is **not accepted** until every metric below is reported and met. Friction-specific rows of §1 do not apply to the servo; the servo's analogue is the amplitude-dependence check.
+
+**Gating metric (the one that qualifies the stage):** residual whiteness and input-decorrelation on **held-out** PRPS data. A good training fit shows the model *can* fit; white, input-uncorrelated validation residuals show the dynamics are actually *captured*.
+
+| # | Metric (§1) | Target | How it is constructed | Data required |
+|---|---|---|---|---|
+| 1 | Validation fit (VAF / NRMSE) | VAF $\ge 90\%$ / NRMSE-fit $\ge 80\%$ | `lsim` the selected model on each held-out PRPS seed; compare to measured $\theta$ | Held-out PRPS seeds (≥1 per amplitude), not used in fitting |
+| 2 | Train–validation fit gap | $\le 5$–$10$ pts | Difference between training-file fit and held-out fit (overfit detector) | Training + held-out PRPS seeds |
+| 3 | Residual autocorrelation | within 95% confidence band | ACF of the time-domain residual $e = \theta - \hat\theta$ from the `lsim` prediction on held-out data | Held-out PRPS time series |
+| 4 | Residual–input cross-correlation | within 95% band | Cross-correlation of $e$ with $u_{servo}$ on held-out data → confirms model order sufficient | Held-out PRPS time series + command log |
+| 5 | FRF coherence $\gamma^2$ | $\ge 0.9$ over identified band | Per-frequency coherence from the PRPS spectral estimate; **defines the trustworthy band** handed downstream | All PRPS runs (per amplitude) |
+| 6 | Parameter CIs on $K, \tau, L$ | relative SE $\le 10$–$20\%$ | Bootstrap resample of training FRFs, refit the FOPD model, take the parameter cloud (preserves $K$–$\tau$–$L$ correlation) | All PRPS training files |
+| 7 | Cross-seed / cross-run spread | within the CIs of #6 | Compare per-seed and per-amplitude point fits against the bootstrap CIs (repeatability vs. one lucky fit) | ≥4 seeds × multiple amplitudes |
+| 8 | Amplitude-dependence (servo analogue of the friction row) | bound and document, not a point estimate | Report $\tau$ vs. amplitude trend and the cross-amplitude generalization error; fold into the model's validity envelope | PRPS at ≥3 amplitudes |
+
+**Exit → Entry.** The bootstrap parameter cloud from metric #6 and the coherence band from metric #5 are the deliverables consumed by Stage 2. A CI too wide for a single robust stabilizer to cover the set is a **Stage 1 failure**, not a Stage 2 problem — it means the identification must be tightened (more averaging, higher SNR, narrower band), not worked around downstream.
+
+**Out of scope.** Step / large-signal results (slew, deadband, saturation, asymmetry) are reported as validity bounds, not graded against the table above. They qualify *where* the accepted model may be used, not *whether* it is accepted.
 
 ---
 
 ## Current Status
 
-Initial planning stage.
-
-Next steps:
-
-1. Define the encoder count-to-angle calibration procedure.
-2. Collect static command-to-angle sweep data.
-3. Collect step-response data over small and moderate command changes.
-4. Use step-response results to estimate rough actuator time scale.
-5. Design targeted PRPS or multi-sine excitation to identify the servo's usable dynamic range before selecting the initial rail-controller bandwidth.
-6. Fit and validate low-order servo models.
-7. Decide whether the servo can be modeled as static or must be included explicitly in the rail control model.
+Open-loop servo identification **complete and accepted**; all eight [project_metrics.md §1](../../docs/project_metrics.md#1-open-loop-actuator-identification-servo-thrust-friction) metrics met and consolidated in [results.md](results.md). Residual whiteness (#3–#4) is assessed via the frequency-domain residual (the multisine-appropriate form); a time-domain ACF/CCF diagnostic is available in [analyze_servo_prps_frequency_fit.m](../../analysis/system_identification/servo_identification/servo_prps_log/analyze_servo_prps_frequency_fit.m) but over-rejects on PRPS line-spectrum data and is not the metric of record.
