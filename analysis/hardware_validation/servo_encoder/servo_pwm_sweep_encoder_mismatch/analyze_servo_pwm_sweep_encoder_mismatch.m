@@ -25,7 +25,7 @@ DATASET_STATUS = "candidate";   % candidate | accepted | rejected | diagnostics
 USE_LATEST_CSV = true;
 dataFile       = "servo_pwm_sweep_encoder_mismatch.csv";   % used if USE_LATEST_CSV=false
 
-COUNTS_PER_REV     = 2400;
+COUNTS_PER_REV     = encoderAngleScale().counts_per_rev;   % spec-derived (1:1 GT2 16T)
 QUANT_REF_COUNTS   = 5;          % quantization/minor-backlash reference (~0.75 deg) for plots
 SYSTEMATIC_LOSS_DEG = 2.0;       % above this = real dropped counts, not quantization noise
 SAVE_FIGURES       = false;

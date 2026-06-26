@@ -29,7 +29,7 @@ dataFile = "servo_prps_log_amp100_seed4001_set01.csv";
 
 SAVE_FIGURES = false;
 
-COUNTS_PER_REV = 2400;
+COUNTS_PER_REV = encoderAngleScale().counts_per_rev;   % spec-derived (1:1 GT2 16T)
 DEFAULT_SERVO_CENTER_US = 1450;
 
 % Validation thresholds

@@ -19,7 +19,7 @@ DATASET_STATUS = string(DATASET_STATUS);
 
 %% Servo and PRPS settings
 
-COUNTS_PER_REV = 2400.0;
+COUNTS_PER_REV = encoderAngleScale().counts_per_rev;   % spec-derived (1:1 GT2 16T)
 DEFAULT_SERVO_CENTER_US = 1450;
 SERVO_OUTPUT_SIGN = -1;
 DEFAULT_FREQ_LABEL = "0.1_to_3Hz";

@@ -102,7 +102,7 @@ NOMINAL_COMMAND_DT_S = 0.010;
 
 %% Reconstruction settings for Pico CSVs
 
-COUNTS_PER_REV = 2400.0;
+COUNTS_PER_REV = encoderAngleScale().counts_per_rev;   % spec-derived (1:1 GT2 16T)
 DEFAULT_SERVO_CENTER_US = 1450;
 
 % Sign convention:

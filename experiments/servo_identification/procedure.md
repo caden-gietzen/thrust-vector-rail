@@ -53,9 +53,18 @@ Servo driven by 50 Hz PWM from the Raspberry Pi Pico (GP15); motion measured thr
 
 ## Procedure Steps
 
-### 1. Encoder count-to-angle calibration
+### 1. Encoder count-to-angle scale (spec-derived)
 
-Establish $N_{enc} \rightarrow \theta$ experimentally rather than from nominal geometry, to absorb pulley, belt-tension, and backlash error. A half-revolution sweep with repeated up/down passes checks repeatability and counts/rev.
+The count-to-angle scale is **spec-derived and exact**: a $1:1$ GT2 belt (equal
+16T pulleys) with a 600 PPR quadrature encoder gives $600 \times 4 = 2400$
+counts/rev, i.e. $0.15^\circ/\text{count}$. A toothed belt does not slip and equal
+integer teeth give an exact angular ratio, so there is no continuous error to
+calibrate out (unlike the linear rail, where pitch-line diameter does introduce a
+real scale error). Single source of truth:
+[`encoderAngleScale()`](../../analysis/utils/encoderAngleScale.m). The
+half-revolution sweep is retained only as a coarse **no-tooth-skip sanity check**,
+not the calibration basis. Backlash ($\approx 2.4^\circ$) is a separate additive
+offset, not a scale error.
 
 ### 2. Static command-to-angle map
 

@@ -31,32 +31,37 @@ The dangerous mistake would be jumping straight to a wide PRPS range like `0.05�
 
 ## Encoder angle conversion
 
-Because both pulleys are 20T, the mechanical ratio is:
+The servo output shaft and the encoder are coupled by a GT2 timing belt with
+**equal pulleys (16T : 16T)**, so the rotational ratio is exactly $1:1$:
 
 $$
 \theta_{\text{servo}} = \theta_{\text{encoder}}
 $$
 
-So:
+This conversion is **spec-derived and exact**, not empirically calibrated. GT2 is
+a *toothed* belt — it does not slip, and equal integer tooth counts give an exact
+angular ratio; belt tension does not change counts-per-degree. The encoder is
+**600 pulses per revolution** and the quadrature decoder counts all four edges, so:
+
+$$N_{\text{counts/rev}} = 600 \times 4 = 2400$$
 
 $$
-\theta_{\text{rad}} = \frac{2\pi \cdot \text{count}}{N_{\text{counts/rev}}}
-$$​
-
-where:
-
-- $\theta_{\text{rad}}$​ is servo output angle in radians,
-- `count` is the encoder count,
-- $N_{\text{counts/rev}}$​ is encoder counts per full revolution.
-
-If your encoder is **600 pulses per revolution** and the quadrature decoder counts all four edges, then:
-
-$$N_{\text{counts/rev}} = 2400$$
-
-That gives:
-
+\theta_{\text{deg}} = 360 \cdot \frac{\text{count}}{2400} = 0.15 \cdot \text{count}
+\quad(\text{exact})
 $$
-\theta_{\text{deg}} = 360 \cdot \frac{\text{count}}{2400}
-$$​
 
-But verify this experimentally. Command a slow sweep or manually rotate the servo pulley one full revolution if mechanically possible and check the count change. Do not blindly trust the 2400 number until confirmed — see [Section 2 of the servo identification results](../../experiments/servo_identification/results.md#2-encoder-count-to-angle-calibration) for the measured calibration (1207 counts over a half-revolution, confirming ≈ 2414 counts/rev).
+This is the single source of truth in
+[`encoderAngleScale()`](../../analysis/utils/encoderAngleScale.m). Scripts pull the
+scale from there rather than hardcoding $2400$.
+
+**Why spec, not empirical.** Unlike the linear rail encoder — where the belt
+converts rotation to *translation* and the pitch-line diameter introduces a real
+scale error (nominal $60$ vs measured $64.81$ counts/mm, see
+[encoder_calibration/results.md](../../experiments/encoder_calibration/results.md)) —
+a $1:1$ *angular* coupling has no such ambiguity. The earlier "$\approx 2414$
+counts/rev" figure came from reading a sweep as $180^\circ$ off video/protractor;
+at the exact $2400$ scale that sweep was actually $\approx 181^\circ$, i.e. a $\sim
+1^\circ$ ($0.6\%$) protractor misread, not a physical scale. A half-revolution
+sweep is retained only as a coarse **no-tooth-skip sanity check** (fast moves can
+drop counts — see the encoder-mismatch validation), not as the calibration basis.
+Backlash ($\approx 2.4^\circ$) is a separate additive offset, not a scale error.

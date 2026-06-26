@@ -32,7 +32,7 @@ ANALYZE_MODE = "all";           % "latest", "single", or "all"
 dataFile = "servo_450_to_2450_half_rev_sweep.csv";
 
 EXPECTED_HALF_REV_COUNTS = 1200;
-EXPECTED_COUNTS_PER_REV = 2400;
+EXPECTED_COUNTS_PER_REV = encoderAngleScale().counts_per_rev;   % spec-derived (1:1 GT2 16T)
 
 SERVO_0_DEG_US = 450;
 SERVO_180_DEG_US = 2450;
@@ -291,7 +291,7 @@ for fileIdx = 1:numel(dataFiles)
     figure;
     plot(expected_deg(validCpr), estimated_cpr(validCpr), "o", "LineWidth", 1.1);
     hold on;
-    yline(EXPECTED_COUNTS_PER_REV, "--", "Expected 2400 counts/rev");
+    yline(EXPECTED_COUNTS_PER_REV, "--", sprintf("Expected %.0f counts/rev", EXPECTED_COUNTS_PER_REV));
     grid on;
     xlabel("Expected Commanded Angle (deg)");
     ylabel("Estimated Counts per Revolution");
@@ -359,7 +359,7 @@ fprintf("\nPractical interpretation:\n");
 
 if abs(combinedHalfRevErrorPct) <= 5
     fprintf("  PASS: Combined endpoint result is within 5%% of 1200 counts.\n");
-    fprintf("  It is reasonable to use 2400 counts/rev for servo angle conversion.\n");
+    fprintf("  Sanity check OK: consistent with the spec-derived %.0f counts/rev.\n", EXPECTED_COUNTS_PER_REV);
 elseif abs(combinedHalfRevErrorPct) <= 12.5
     fprintf("  MARGINAL: Combined endpoint result is in the rough usable range, but not tight.\n");
     fprintf("  Check belt tension, endpoint assumptions, and servo settling.\n");
