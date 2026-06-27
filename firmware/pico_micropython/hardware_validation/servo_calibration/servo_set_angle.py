@@ -1,5 +1,6 @@
 import time
 from machine import Pin, PWM
+import servo_static_map
 
 SERVO_PIN    = 15
 SERVO_FREQ_HZ = 50
@@ -7,7 +8,8 @@ SERVO_MIN_US  = 450
 SERVO_MAX_US  = 2450
 
 # Edit this value and re-run to command a new position.
-SERVO_US = 1350
+# Defaults to the zero-angle center (single source: lib/servo_static_map.py).
+SERVO_US = servo_static_map.NEUTRAL_US
 
 pwm = PWM(Pin(SERVO_PIN))
 pwm.freq(SERVO_FREQ_HZ)

@@ -4,6 +4,13 @@
   "remote_config_path": "run_config.json",
   "write_manifest": false,
 
+  "uploads": [
+    {
+      "local": "firmware/pico_micropython/lib/servo_static_map.py",
+      "remote": "lib/servo_static_map.py"
+    }
+  ],
+
   "repeat_sequence": {
     "count": 1
   },

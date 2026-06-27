@@ -41,6 +41,7 @@
 import time
 from machine import Pin, PWM
 import encoder
+import servo_static_map
 
 
 # ============================================================
@@ -70,9 +71,9 @@ def make_config():
         "SERVO_FREQ_HZ": 50,
         "SERVO_HARD_MIN_US": 1000,
         "SERVO_HARD_MAX_US": 2000,
-        # From servo identification (experiments/servo_identification/results.md):
-        "SERVO_NEUTRAL_US": 1350,
-        "SERVO_DEG_PER_US": 0.091092,   # |static gain|, deg/µs
+        # Single source of truth: lib/servo_static_map.py
+        "SERVO_NEUTRAL_US": servo_static_map.NEUTRAL_US,
+        "SERVO_DEG_PER_US": servo_static_map.DEG_PER_US,   # |static gain|, deg/µs
 
         # --------------------------------------------------------
         # ESC

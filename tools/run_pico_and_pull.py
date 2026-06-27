@@ -422,6 +422,16 @@ def load_orchestration_plan(plan_path):
     with open(plan_path, "r", encoding="utf-8") as f:
         plan = json.load(f)
 
+    uploads = plan.get("uploads")
+    if uploads is not None:
+        if not isinstance(uploads, list):
+            raise RuntimeError("'uploads' must be a list of {local, remote} objects.")
+        for i, item in enumerate(uploads, start=1):
+            if not isinstance(item, dict) or "local" not in item or "remote" not in item:
+                raise RuntimeError(
+                    f"Upload {i} must be an object with 'local' and 'remote' fields."
+                )
+
     has_explicit_segments = "segments" in plan
     has_repeated_sequence = "sequence" in plan and "repeat_sequence" in plan
 
@@ -480,8 +490,8 @@ def expand_orchestration_segments(plan):
         - If repeat_sequence includes base_prps_seed, PRPS seed fields are
           injected into each segment config.
         - If base_prps_seed is omitted, no seed fields are injected. This is
-          useful for non-PRPS calibration runs such as static sweeps, mismatch
-          sweeps, and half-revolution calibration.
+          useful for non-PRPS calibration runs such as static sweeps and
+          mismatch sweeps.
     """
     if "segments" in plan:
         return plan["segments"]
@@ -573,6 +583,34 @@ def expand_orchestration_segments(plan):
             expanded_segments.append(segment)
 
     return expanded_segments
+
+
+def upload_plan_dependencies(plan, port):
+    """
+    Push any files declared under the plan's optional "uploads" list to the Pico
+    before running segments.
+
+    Each entry is {"local": <path>, "remote": <pico path>}. Local paths are
+    resolved relative to the repo root unless absolute. This is how a script's
+    library dependencies (e.g. lib/encoder_home.py) get refreshed to the latest
+    laptop version on every orchestrated run — no manual `fs cp` needed.
+    """
+    uploads = plan.get("uploads", [])
+    if not uploads:
+        return
+
+    print("\nUploading plan dependencies:")
+    for item in uploads:
+        local_path = Path(item["local"])
+        if not local_path.is_absolute():
+            local_path = (REPO_ROOT / local_path).resolve()
+
+        if not local_path.exists():
+            raise FileNotFoundError(f"Upload dependency not found: {local_path}")
+
+        remote = item["remote"]
+        print(f"  {local_path}  ->  {remote}")
+        upload_file_to_pico(local_path, remote, port)
 
 
 def write_temp_segment_config(segment):
@@ -705,6 +743,8 @@ def run_orchestrated_mode(pico_script_path, plan_path, port, output_dir, cli_wri
         print(f"  enabled -> {manifest_path}")
     else:
         print("  disabled")
+
+    upload_plan_dependencies(plan, port)
 
     all_pulled = []
 

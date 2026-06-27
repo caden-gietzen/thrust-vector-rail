@@ -1,0 +1,38 @@
+{
+  "uploads": [
+    {
+      "local": "firmware/pico_micropython/lib/servo_static_map.py",
+      "remote": "lib/servo_static_map.py"
+    },
+    {
+      "local": "firmware/pico_micropython/lib/encoder_home.py",
+      "remote": "lib/encoder_home.py"
+    }
+  ],
+  "segments": [
+    {
+      "name": "homing",
+      "config": {
+        "HOME_ANGLE_DEG": -45.0,
+        "NUM_ROUND_TRIPS": 2,
+        "SERVO_SETTLE_MS": 700,
+
+        "REST_WINDOW_MS": 400,
+        "REST_THRESHOLD_COUNTS": 10,
+        "REST_MAX_WAIT_MS": 4000,
+
+        "HOMING_ESC_START_US": 1150,
+        "HOMING_ESC_STEP_US": 25,
+        "HOMING_ESC_MAX_US": 1800,
+        "RAMP_DWELL_MS": 400,
+        "MOVE_DETECT_COUNTS": 50,
+
+        "HALT_DURATION_S": 1.2,
+        "HALT_THRESHOLD_COUNTS": 15,
+        "LEG_TIMEOUT_S": 25,
+
+        "REPEATABILITY_WARN_PCT": 2.0
+      }
+    }
+  ]
+}

@@ -16,6 +16,11 @@ eggs/
 .eggs/
 lib/
 lib64/
+
+# ...but firmware MicroPython lib modules are hand-written source, not Python
+# build artifacts — keep them tracked despite the lib/ rule above.
+!firmware/pico_micropython/lib/
+!firmware/pico_micropython/lib/*.py
 parts/
 sdist/
 var/
