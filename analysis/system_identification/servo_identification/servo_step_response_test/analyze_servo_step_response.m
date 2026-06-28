@@ -22,12 +22,23 @@ clear; clc; close all;
 %% User Options
 
 DATASET_STATUS = "candidate";   % candidate | accepted | rejected | diagnostics
-ANALYZE_MODE   = "latest";      % latest | single | all (latest -> one figure)
+ANALYZE_MODE   = "all";      % latest | single | all (latest -> one figure)
 dataFile       = "servo_step_response_test.csv";   % used only when mode = single
 
 % Static command-to-angle gain from the shared static-map util (single source of
 % truth; identified by analyze_servo_static_sweep.m).
 STATIC_GAIN_DEG_PER_US = servoStaticMap().gain_deg_per_us;
+
+% Encoder count-to-angle scale from the shared spec-derived util (single source of
+% truth). Measured angle is recomputed from raw count_delta through this, rather
+% than trusting the device-computed theta_deg column, so the analysis honours the
+% same truth value the firmware was supposed to use.
+DEG_PER_COUNT = encoderAngleScale().deg_per_count;
+
+% PRPS velocity ceiling is set to this fraction of the measured saturated slew
+% (the rate-limit plateau) -- a conservative linearity margin for excitation
+% design. Matches the "roughly half the peak" rule in results.md.
+PRPS_CEILING_FRACTION = 0.5;
 
 PRE_STEP_TAIL_FRACTION  = 0.40;   % last 40% of pre-step hold -> theta_initial
 POST_STEP_TAIL_FRACTION = 0.25;   % last 25% of response      -> theta_final
@@ -66,7 +77,7 @@ stepRows = table();   % one row per step segment (compact)
 
 for fileIdx = 1:numel(dataFiles)
 
-    D = loadStepFile(fullfile(dataDir, dataFiles(fileIdx)), STATIC_GAIN_DEG_PER_US);
+    D = loadStepFile(fullfile(dataDir, dataFiles(fileIdx)), STATIC_GAIN_DEG_PER_US, DEG_PER_COUNT);
 
     % --- The one figure: measured vs static-map command angle ---
     figure("Color", "k");
@@ -105,13 +116,13 @@ for fileIdx = 1:numel(dataFiles)
                   - STATIC_GAIN_DEG_PER_US * S.step_start_us(1));
         [delay_s, rise_s] = estimateRiseDelay(S.time_since_step_s, S.theta_deg, ...
                                               theta0, thetaF, DELAY_THRESHOLD_FRACTION);
-        slew = peakSlewDegPerSec(S.time_since_step_s, S.theta_deg);
+        [slewSus, slewPk] = slewMetrics(S.time_since_step_s, S.theta_deg);
 
         stepRows = [stepRows; table( ...
             groups.case_label(g), round(abs(cmdDelta)), sign(cmdDelta), ...
-            isReversal(groups.case_label(g)), delay_s, rise_s, slew, ...
+            isReversal(groups.case_label(g)), delay_s, rise_s, slewSus, slewPk, ...
             'VariableNames', {'case', 'mag_deg', 'dir', 'reversal', ...
-                              'delay_s', 'rise_s', 'slew_dps'})]; %#ok<AGROW>
+                              'delay_s', 'rise_s', 'slew_dps', 'slew_peak_dps'})]; %#ok<AGROW>
     end
 
     if SAVE_FIGURE
@@ -134,7 +145,18 @@ reversals   = stepRows(stepRows.reversal, :);                              % +/-
 tau   = median(centerSmall.rise_s, "omitnan") / 2.2;   % rough only
 f_c   = 1 / (2*pi*tau);
 L     = median(centerSmall.delay_s, "omitnan");
-slewMax = max(stepRows.slew_dps, [], "omitnan");
+
+% Rate-limit plateau (the slew that founds the PRPS ceiling) comes from the steps
+% large enough to saturate the servo's angular velocity -- the large center-out
+% (>= ~18 deg) and full reversals -- not the small steps, which never reach the
+% limit. Sustained slew is the plateau; peak is the worst single-sample velocity.
+largeRows  = stepRows(stepRows.reversal | stepRows.mag_deg >= 18, :);
+if isempty(largeRows); largeRows = stepRows; end
+slewSat    = max(largeRows.slew_dps, [], "omitnan");        % saturated plateau
+slewPeak   = max(stepRows.slew_peak_dps, [], "omitnan");    % worst instantaneous
+slewSatPos = max(largeRows.slew_dps(largeRows.dir > 0), [], "omitnan");
+slewSatNeg = max(largeRows.slew_dps(largeRows.dir < 0), [], "omitnan");
+prpsCeiling = PRPS_CEILING_FRACTION * slewSat;
 
 % Rate-limiting indicator: reversal rise time vs small center-out rise time.
 riseSmall = median(centerSmall.rise_s, "omitnan");
@@ -152,7 +174,9 @@ fprintf("  rough delay L: ~%.0f ms   (at/below the 20 ms sample interval)\n", L*
 fprintf("  corner f_c   : ~%.1f Hz   -> center PRPS band near here\n", f_c);
 
 fprintf("\n--- VALIDITY ENVELOPE ---\n");
-fprintf("  peak slew rate     : ~%.0f deg/s\n", slewMax);
+fprintf("  saturated slew (plateau): ~%.0f deg/s   (large/reversal steps; rate limit)\n", slewSat);
+fprintf("    by direction          : +%.0f / -%.0f deg/s\n", slewSatPos, slewSatNeg);
+fprintf("  peak instantaneous slew : ~%.0f deg/s\n", slewPeak);
 fprintf("  rate-limiting       : reversal rise %.2fx the small-step rise", rateRatio);
 if rateRatio > 1.2
     fprintf("  -> large steps rate-limited; keep PRPS amplitude modest\n");
@@ -160,18 +184,32 @@ else
     fprintf("  -> no strong amplitude dependence\n");
 end
 fprintf("  directional asymmetry: ~%.0f%% (+ vs - center-out rise)\n", asymPct);
-fprintf("  saturation          : none in +/-20 deg test range\n");
+
+fprintf("\n--- PRPS EXCITATION BOUND (derived from the plateau) ---\n");
+fprintf("  velocity ceiling   : ~%.0f deg/s   (%.0f%% of saturated slew)\n", ...
+        prpsCeiling, PRPS_CEILING_FRACTION * 100);
+fprintf("  -> per-line bound: peak command velocity 2*pi*f*A <= ceiling across the band\n");
+
+% Per-case slew table so the plateau (large steps converging to one velocity) is
+% visible rather than collapsed into a single number.
+fprintf("\n--- PER-CASE SLEW (sustained / peak, deg/s) ---\n");
+byCase = sortrows(stepRows, "mag_deg");
+for r = 1:height(byCase)
+    fprintf("  %-26s mag %2d deg  dir %+d  rev %d : %4.0f / %4.0f\n", ...
+        byCase.case(r), byCase.mag_deg(r), byCase.dir(r), byCase.reversal(r), ...
+        byCase.slew_dps(r), byCase.slew_peak_dps(r));
+end
 
 %% Local Functions
 
-function D = loadStepFile(dataPath, staticGain)
+function D = loadStepFile(dataPath, staticGain, degPerCount)
     opts = detectImportOptions(dataPath, "FileType", "text", "Delimiter", ",", ...
                                "VariableNamingRule", "preserve");
     T = readtable(dataPath, opts);
     names = matlab.lang.makeValidName(erase(strtrim(string(T.Properties.VariableNames)), char(65279)));
     T.Properties.VariableNames = cellstr(names);
 
-    req = ["t_s", "servo_us", "theta_deg", "phase", "case_label", "rep_idx", ...
+    req = ["t_s", "servo_us", "phase", "case_label", "rep_idx", ...
            "step_start_us", "step_end_us", "time_since_step_s"];
     for k = 1:numel(req)
         if ~ismember(req(k), string(T.Properties.VariableNames))
@@ -179,18 +217,31 @@ function D = loadStepFile(dataPath, staticGain)
         end
     end
 
+    % Measured angle: recompute from raw count_delta through the spec-derived
+    % encoder scale (the truth source) rather than trusting the device-computed
+    % theta_deg column. Fall back to the device column only if counts are absent.
+    if ismember("count_delta", string(T.Properties.VariableNames))
+        theta_deg = degPerCount * T.count_delta;
+    elseif ismember("theta_deg", string(T.Properties.VariableNames))
+        theta_deg = T.theta_deg;
+    else
+        error("CSV has neither count_delta nor theta_deg: %s", dataPath);
+    end
+
     if ismember("case_idx", string(T.Properties.VariableNames))
         case_idx = T.case_idx;
     else
         [~, ~, case_idx] = unique([T.step_start_us, T.step_end_us], "rows", "stable");
     end
+    % Command angle from the static-map truth gain, referenced to each step's own
+    % start command so the intercept cancels (binning only uses command deltas).
     if ismember("theta_cmd_deg", string(T.Properties.VariableNames))
         theta_cmd_deg = T.theta_cmd_deg;
     else
         theta_cmd_deg = staticGain * T.servo_us;   % intercept cancels in deltas
     end
 
-    D = table(T.t_s, T.servo_us, T.theta_deg, theta_cmd_deg, string(T.phase), ...
+    D = table(T.t_s, T.servo_us, theta_deg, theta_cmd_deg, string(T.phase), ...
               case_idx, string(T.case_label), T.rep_idx, ...
               T.step_start_us, T.step_end_us, T.time_since_step_s, ...
               'VariableNames', {'t_s', 'servo_us', 'theta_deg', 'theta_cmd_deg', ...
@@ -209,10 +260,30 @@ function yTail = tailMedian(y, frac)
     yTail = median(y(end - n + 1:end), "omitnan");
 end
 
-function slew = peakSlewDegPerSec(t, y)
-    y = movmean(y, 3, "omitnan");          % suppress 1-count quantization spikes
-    rate = diff(y) ./ diff(t);
-    slew = max(abs(rate), [], "omitnan");
+function [slewSustained, slewPeak] = slewMetrics(t, y)
+    % Slew estimates from one step transient.
+    %   slewPeak      - largest instantaneous |velocity|, lightly median-filtered
+    %                   to reject single-count quantization spikes.
+    %   slewSustained - max of a ~16 ms moving average of |velocity|: the
+    %                   rate-limit PLATEAU a saturating step holds, which is the
+    %                   number that founds the PRPS velocity ceiling. With fast
+    %                   (4 ms) sampling the window spans several samples and
+    %                   isolates the plateau; with slow (20 ms) data it collapses
+    %                   toward the peak, so the estimate degrades gracefully.
+    slewSustained = NaN; slewPeak = NaN;
+    valid = isfinite(t) & isfinite(y);
+    t = t(valid); y = y(valid);
+    if numel(t) < 3; return; end
+    [t, ord] = sort(t); y = y(ord);
+
+    dt = median(diff(t), "omitnan");
+    v  = diff(y) ./ diff(t);
+    vMed = movmedian(v, 3, "omitnan");
+    slewPeak = max(abs(vMed), [], "omitnan");
+
+    win = max(1, round(0.016 / dt));
+    vSust = movmean(abs(vMed), win, "omitnan");
+    slewSustained = max(vSust, [], "omitnan");
 end
 
 function [delay_s, rise_s] = estimateRiseDelay(t, y, y0, yf, delayFrac)

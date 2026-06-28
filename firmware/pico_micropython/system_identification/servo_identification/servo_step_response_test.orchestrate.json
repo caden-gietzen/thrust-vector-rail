@@ -1,8 +1,15 @@
 {
   "orchestration_version": 1,
-  "description": "Repeated servo step-response test for command-to-angle dynamic identification.",
+  "description": "Repeated servo step-response test for command-to-angle dynamic identification. Center and static gain come from lib/servo_static_map.py (uploaded below); the step transient is captured at 1 kHz (RAM-buffered, microsecond-timestamped) so peak slew rate, delay, and the rate-limit plateau are well resolved. PWM stays at 200 Hz to match the PRPS-identified actuation regime.",
   "remote_config_path": "run_config.json",
   "write_manifest": false,
+
+  "uploads": [
+    {
+      "local": "firmware/pico_micropython/lib/servo_static_map.py",
+      "remote": "lib/servo_static_map.py"
+    }
+  ],
 
   "repeat_sequence": {
     "count": 2
@@ -14,18 +21,17 @@
       "script": "servo_step_response_test.py",
       "config": {
         "FILENAME": "servo_step_response_test",
-        "SERVO_CENTER_US": 1450,
         "SERVO_MIN_US": 450,
         "SERVO_MAX_US": 2450,
-        "SERVO_FREQ_HZ": 50,
+        "SERVO_FREQ_HZ": 200,
 
         "SAMPLE_PERIOD_MS": 20,
+        "STEP_SAMPLE_PERIOD_MS": 1,
+        "STEP_FAST_WINDOW_MS": 350,
+        "FLUSH_EVERY_N_ROWS": 50,
         "PRE_STEP_HOLD_MS": 800,
         "POST_STEP_HOLD_MS": 1500,
         "BETWEEN_STEP_CENTER_HOLD_MS": 800,
-
-        "STATIC_GAIN_DEG_PER_US": -0.091092,
-        "STATIC_INTERCEPT_DEG": 130.329728,
 
         "STEP_CASES": [
           {

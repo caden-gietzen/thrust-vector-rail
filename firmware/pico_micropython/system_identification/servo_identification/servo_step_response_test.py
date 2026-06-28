@@ -1,7 +1,27 @@
 import time
 import math
+from array import array
 from machine import Pin, PWM
 import encoder
+
+
+# ------------------------------------------------------------
+# Servo truth values (single source of truth).
+#
+# The zero-angle center command and the static gain live in
+# lib/servo_static_map.py (the device-side mirror of
+# analysis/utils/servoStaticMap.m). Pull them from there so this test never
+# hardcodes a stale center/gain. If the module isn't flashed to /lib yet -- e.g.
+# a standalone run before the orchestrator's "uploads" step has populated it --
+# fall back to the last-known literals so the script still runs.
+try:
+    from servo_static_map import NEUTRAL_US as _TRUTH_CENTER_US
+    from servo_static_map import DEG_PER_US as _TRUTH_DEG_PER_US
+    _TRUTH_SOURCE = "lib/servo_static_map.py"
+except ImportError:
+    _TRUTH_CENTER_US = 1431
+    _TRUTH_DEG_PER_US = 0.091092
+    _TRUTH_SOURCE = "fallback literals (servo_static_map not on /lib)"
 
 # ============================================================
 # Servo step-response test
@@ -28,24 +48,59 @@ SERVO_PIN = 15
 MAX_STEP_RATE = 1_000_000
 DRAIN_HZ = 10_000
 
-SERVO_CENTER_US = 1450
+# Zero-angle center from the static-map truth source (lib/servo_static_map.py).
+SERVO_CENTER_US = _TRUTH_CENTER_US
 SERVO_MIN_US = 450
 SERVO_MAX_US = 2450
-SERVO_FREQ_HZ = 50
 
+# PWM carrier = the servo's actuation/command-refresh rate (200 Hz -> one frame
+# every 5 ms). Kept at 200 Hz ON PURPOSE: the PRPS model this step test feeds was
+# identified in the 200 Hz actuation regime (clean coherence to ~10.7 Hz), so the
+# recon corner and validity envelope must be measured in that same regime. Raising
+# the carrier would characterise delay/slew in a regime the model is not fit for,
+# and not every servo tracks a faster frame cleanly. This is independent of the
+# encoder SAMPLE rate below, which we DO push high.
+SERVO_FREQ_HZ = 200
+
+# Encoder count-to-angle scale: spec-derived and exact (1:1 GT2 16T belt, 600 PPR
+# x 4 quadrature = 2400 counts/rev = 0.15 deg/count). Single source of truth on
+# the analysis side is analysis/utils/encoderAngleScale.m -- keep this in sync.
 COUNTS_PER_REV = 2400.0
 
-# Static map from 2026_05_24 static sweep.
-# theta_deg = STATIC_GAIN_DEG_PER_US * servo_us + STATIC_INTERCEPT_DEG
-STATIC_GAIN_DEG_PER_US = -0.091092
-STATIC_INTERCEPT_DEG = 130.329728
+# Static command-to-angle gain from the truth source (signed; angle decreases with
+# command). theta_deg = STATIC_GAIN_DEG_PER_US * (servo_us - SERVO_CENTER_US).
+STATIC_GAIN_DEG_PER_US = -_TRUTH_DEG_PER_US
 
 PRE_ZERO_CENTER_SETTLE_MS = 2000
 POST_ZERO_SETTLE_MS = 300
 BASELINE_HOLD_MS = 1000
 
 # Default timing.
+#
+# Holds (pre-step settle, post-step tail, return-to-center) only need to confirm
+# the servo has settled, so they sample at the slow SAMPLE_PERIOD_MS via the
+# inline format-and-write path.
+#
+# The step transient is where peak slew rate, delay, and the rate-limit plateau
+# are measured -- the numbers that found the PRPS velocity ceiling and
+# amplitude/band limits. At 20 ms only 2-3 points land on the steep part of a
+# ~30 ms rise, biasing slew low. So the transient is captured at a much higher
+# rate (STEP_SAMPLE_PERIOD_MS) by a dedicated RAM-buffered, microsecond-timestamped
+# busy-poll loop (capture_step_response_fast): samples are stored as raw
+# (t_us, count) and only formatted/written AFTER the burst, so the sample rate is
+# decoupled from flash-write/format cost (the same reason the PRPS logger buffers).
+# Microsecond timestamps are required so sub-millisecond samples have distinct t
+# values (a 1 ms-resolution clock would alias adjacent samples and corrupt the
+# velocity estimate). 1 ms (1 kHz) is ~5x oversampling the 5 ms PWM frame and well
+# within RP2040 RAM/CPU; lower it if flash space is tight. May be fractional.
 SAMPLE_PERIOD_MS = 20
+STEP_SAMPLE_PERIOD_MS = 1
+# Only the first STEP_FAST_WINDOW_MS of the post-step hold is captured at the fast
+# rate; the rest is sampled at SAMPLE_PERIOD_MS. The transient (move + initial
+# settle) of the largest step here is ~200 ms, so ~350 ms of fast capture covers
+# it with margin while keeping the per-run CSV inside the Pico flash. Set <= 0 to
+# capture the entire post-step hold fast.
+STEP_FAST_WINDOW_MS = 350
 PRE_STEP_HOLD_MS = 800
 POST_STEP_HOLD_MS = 1500
 BETWEEN_STEP_CENTER_HOLD_MS = 800
@@ -136,7 +191,7 @@ def count_to_theta_rad(count_delta):
 
 
 def command_to_theta_deg(servo_us):
-    return STATIC_GAIN_DEG_PER_US * servo_us + STATIC_INTERCEPT_DEG
+    return STATIC_GAIN_DEG_PER_US * (servo_us - SERVO_CENTER_US)
 
 
 def command_to_theta_rad(servo_us):
@@ -279,10 +334,115 @@ def log_for_duration(
     return row_counter
 
 
+def capture_step_response_fast(start_ms, start_us, duration_ms, sample_period_ms, count_zero):
+    """Capture the step transient into RAM at a high, microsecond-timed rate.
+
+    Returns (t_us_buf, count_buf, n): per-sample microsecond timestamp (relative
+    to start_us) and raw encoder count. NOTHING is formatted or written here --
+    that happens after the burst -- so the realized sample rate is bounded by the
+    encoder read + array store (a few us), not by str.format/flash. A busy-poll on
+    ticks_us gives sub-millisecond pacing; the 1 ms-resolution ticks_ms clock is
+    used only for the coarse phase-duration check.
+    """
+    duration_ms = int(duration_ms)
+    period_us = int(round(float(sample_period_ms) * 1000.0))
+    if period_us < 1:
+        period_us = 1
+
+    capacity = duration_ms * 1000 // period_us + 16
+    t_us_buf = array("i", [0] * capacity)
+    count_buf = array("i", [0] * capacity)
+    n = 0
+
+    phase_start_ms = time.ticks_ms()
+    next_us = time.ticks_us()
+
+    while time.ticks_diff(time.ticks_ms(), phase_start_ms) < duration_ms:
+        if time.ticks_diff(time.ticks_us(), next_us) >= 0 and n < capacity:
+            t_us_buf[n] = time.ticks_diff(time.ticks_us(), start_us)
+            count_buf[n] = encoder.get_count()
+            n += 1
+            next_us = time.ticks_add(next_us, period_us)
+
+    return t_us_buf, count_buf, n
+
+
+def write_captured_step_rows(
+    f,
+    t_us_buf,
+    count_buf,
+    n,
+    start_us,
+    trial_idx,
+    case_idx,
+    case_label,
+    rep_idx,
+    step_start_us,
+    step_end_us,
+    servo_us,
+    count_zero,
+    step_start_time_us,
+    row_counter,
+):
+    """Format and write the buffered step-response samples after the burst."""
+    step_delta_us = int(step_end_us) - int(step_start_us)
+    theta_cmd_deg = command_to_theta_deg(servo_us)
+    theta_cmd_rad = command_to_theta_rad(servo_us)
+
+    for i in range(n):
+        t_us = t_us_buf[i]
+        t_ms = t_us // 1000
+        t_s = t_us / 1_000_000.0
+
+        count = count_buf[i]
+        count_delta = count - count_zero
+        theta_deg = count_to_theta_deg(count_delta)
+        theta_rad = count_to_theta_rad(count_delta)
+
+        # Reconstruct the absolute sample time (start_us + t_us) to difference
+        # against the step instant at microsecond precision.
+        now_us = time.ticks_add(start_us, t_us)
+        time_since_step_us = time.ticks_diff(now_us, step_start_time_us)
+        time_since_step_ms = time_since_step_us // 1000
+        time_since_step_s = time_since_step_us / 1_000_000.0
+
+        f.write("{},{:.6f},{},{},{},{},{},{},{},{},{},{},{:.6f},{:.8f},{},{},{},{:.6f},{:.8f},{},{:.6f}\n".format(
+            t_ms,
+            t_s,
+            trial_idx,
+            case_idx,
+            case_label,
+            rep_idx,
+            "step_response",
+            "step_response",
+            step_start_us,
+            step_end_us,
+            step_delta_us,
+            servo_us,
+            theta_cmd_deg,
+            theta_cmd_rad,
+            count,
+            count_zero,
+            count_delta,
+            theta_deg,
+            theta_rad,
+            time_since_step_ms,
+            time_since_step_s
+        ))
+
+        row_counter += 1
+        if FLUSH_EVERY_N_ROWS <= 1 or (row_counter % FLUSH_EVERY_N_ROWS) == 0:
+            f.flush()
+
+    f.flush()
+    return row_counter
+
+
 def run_step_case(
     f,
     pwm,
     start_ms,
+    start_us,
     count_zero,
     trial_idx,
     case_idx,
@@ -290,20 +450,22 @@ def run_step_case(
     row_counter,
 ):
     label = str(safe_case_value(case, "label", "case_{}".format(case_idx)))
-    start_us = clamp_servo_us(safe_case_value(case, "start_us", SERVO_CENTER_US))
+    case_start_us = clamp_servo_us(safe_case_value(case, "start_us", SERVO_CENTER_US))
     end_us = clamp_servo_us(safe_case_value(case, "end_us", SERVO_CENTER_US))
     reps = int(safe_case_value(case, "reps", 1))
 
     pre_hold_ms = int(safe_case_value(case, "pre_step_hold_ms", PRE_STEP_HOLD_MS))
     post_hold_ms = int(safe_case_value(case, "post_step_hold_ms", POST_STEP_HOLD_MS))
     sample_period_ms = int(safe_case_value(case, "sample_period_ms", SAMPLE_PERIOD_MS))
+    step_sample_period_ms = float(safe_case_value(case, "step_sample_period_ms", STEP_SAMPLE_PERIOD_MS))
+    fast_window_ms = int(safe_case_value(case, "step_fast_window_ms", STEP_FAST_WINDOW_MS))
     return_to_center = bool(safe_case_value(case, "return_to_center", True))
     center_hold_ms = int(safe_case_value(case, "between_step_center_hold_ms", BETWEEN_STEP_CENTER_HOLD_MS))
 
     for rep_idx in range(1, reps + 1):
-        print("Case", case_idx, label, "rep", rep_idx, ":", start_us, "->", end_us)
+        print("Case", case_idx, label, "rep", rep_idx, ":", case_start_us, "->", end_us)
 
-        actual_start_us = write_pwm_us(pwm, start_us)
+        actual_start_us = write_pwm_us(pwm, case_start_us)
 
         row_counter = log_for_duration(
             f,
@@ -316,7 +478,7 @@ def run_step_case(
             rep_idx,
             "pre_step_hold",
             "pre_step_hold",
-            start_us,
+            case_start_us,
             end_us,
             actual_start_us,
             count_zero,
@@ -324,27 +486,68 @@ def run_step_case(
             row_counter
         )
 
+        # Apply the step and capture the TRANSIENT at high rate, then drop to the
+        # slow rate for the settle tail. The fast window is where slew, delay, and
+        # the rate-limit plateau live; the long tail only feeds the final-value
+        # estimate, so sampling it at 1 kHz would just bloat the CSV (and can
+        # overflow the Pico flash). The step instant is timestamped in BOTH ms
+        # (legacy column / slow tail) and us (clean sub-ms velocity), as tightly
+        # around the PWM write as possible.
         step_start_time_ms = time.ticks_ms()
+        step_start_time_us = time.ticks_us()
         actual_end_us = write_pwm_us(pwm, end_us)
 
-        row_counter = log_for_duration(
-            f,
+        if fast_window_ms <= 0:
+            fast_ms = post_hold_ms
+        else:
+            fast_ms = min(post_hold_ms, fast_window_ms)
+
+        t_us_buf, count_buf, n = capture_step_response_fast(
             start_ms,
-            post_hold_ms,
-            sample_period_ms,
+            start_us,
+            fast_ms,
+            step_sample_period_ms,
+            count_zero
+        )
+
+        row_counter = write_captured_step_rows(
+            f,
+            t_us_buf,
+            count_buf,
+            n,
+            start_us,
             trial_idx,
             case_idx,
             label,
             rep_idx,
-            "step_response",
-            "step_response",
-            start_us,
+            case_start_us,
             end_us,
             actual_end_us,
             count_zero,
-            step_start_time_ms,
+            step_start_time_us,
             row_counter
         )
+
+        tail_ms = post_hold_ms - fast_ms
+        if tail_ms > 0:
+            row_counter = log_for_duration(
+                f,
+                start_ms,
+                tail_ms,
+                sample_period_ms,
+                trial_idx,
+                case_idx,
+                label,
+                rep_idx,
+                "step_response",
+                "step_response",
+                case_start_us,
+                end_us,
+                actual_end_us,
+                count_zero,
+                step_start_time_ms,
+                row_counter
+            )
 
         if return_to_center:
             actual_center_us = write_pwm_us(pwm, SERVO_CENTER_US)
@@ -378,6 +581,12 @@ servo = PWM(Pin(SERVO_PIN))
 servo.freq(SERVO_FREQ_HZ)
 
 try:
+    print("Servo truth values from:", _TRUTH_SOURCE)
+    print("  center:", SERVO_CENTER_US, "us  gain:", STATIC_GAIN_DEG_PER_US, "deg/us")
+    print("  PWM carrier:", SERVO_FREQ_HZ, "Hz (command refresh)")
+    print("  hold sample:", SAMPLE_PERIOD_MS, "ms  fast transient:", STEP_SAMPLE_PERIOD_MS,
+          "ms for first", STEP_FAST_WINDOW_MS, "ms")
+
     print("Initializing encoder...")
     encoder.init_configured(ENC_A_PIN, ENC_B_PIN, MAX_STEP_RATE, DRAIN_HZ)
     time.sleep_ms(100)
@@ -394,6 +603,7 @@ try:
     print("Count zero:", count_zero)
 
     start_ms = time.ticks_ms()
+    start_us = time.ticks_us()   # microsecond reference for high-rate step capture
     row_counter = 0
 
     with open(FILENAME, "w") as f:
@@ -427,6 +637,7 @@ try:
                 f,
                 servo,
                 start_ms,
+                start_us,
                 count_zero,
                 trial_idx,
                 case_idx,
