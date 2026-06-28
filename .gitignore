@@ -217,6 +217,14 @@ AGENTS.md
 # Auto-generated analysis reports (written by MATLAB analysis scripts)
 *.report.md
 
+# Raw datasets: only promoted (accepted/) data is tracked. Candidate, rejected,
+# diagnostics, and un-promoted loose CSVs stay local-only until reviewed and
+# promoted to an accepted/ folder.
+data/raw/**
+!data/raw/**/
+!data/raw/**/accepted/
+!data/raw/**/accepted/**
+
 # Auto-generated Monte Carlo validation campaigns
 data/processed/controller_validation/tvr_stabilizer/monte_carlo/
 plots/controller_validation/tvr_stabilizer/monte_carlo/

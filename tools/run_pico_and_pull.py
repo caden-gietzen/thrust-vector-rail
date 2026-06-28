@@ -215,7 +215,9 @@ def ensure_dataset_status_folders(base_output_dir):
     Ensures the standard dataset review folders exist.
 
     New data is written to candidate. After review, files can be moved to
-    accepted, rejected, or diagnostics.
+    accepted, rejected, or diagnostics. Only data under accepted/ is tracked
+    in git; candidate/, rejected/, and diagnostics/ are git-ignored and stay
+    local until a file is promoted into accepted/.
     """
     for folder_name in DATASET_STATUS_FOLDERS:
         folder_path = base_output_dir / folder_name
