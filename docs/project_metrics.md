@@ -9,7 +9,7 @@
 
 ## 0. Requirements flowdown (top-down)
 
-The per-stage metrics in Sections 1–5 are *allocated* from a single top-level requirement.
+The per-stage metrics in Sections 1–5 are *allocated* from the top-level tracking requirement R5 in [requirements.md](requirements.md).
 
 ### The chain
 

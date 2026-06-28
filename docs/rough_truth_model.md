@@ -11,10 +11,9 @@
 This document consolidates the conclusions of the completed open-loop identification work
 into a single plant definition. It is the bridge between Phase 1 identification and the
 crude-stabilizer design that bootstraps closed-loop identification. The parameter
-uncertainties below are the top of the project's requirements flowdown — they *become* the
-crude-stabilizer uncertainty set; see [docs/project_metrics.md](project_metrics.md) for the
-per-stage metric budget and [docs/objectives_requirements_constrains.md](objectives_requirements_constrains.md)
-for the top-level specification.
+uncertainties below become the crude-stabilizer uncertainty set; see [project_metrics.md](project_metrics.md)
+for the per-stage metric budget and [requirements.md](requirements.md) for the a priori
+top-level requirements.
 
 Source identification reports:
 - Servo — [experiments/servo_identification/results.md](../experiments/servo_identification/results.md)
