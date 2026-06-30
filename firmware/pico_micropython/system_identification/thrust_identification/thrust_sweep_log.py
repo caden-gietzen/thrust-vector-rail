@@ -4,11 +4,11 @@
 # Hardware:
 #   - Raspberry Pi Pico / RP2040 running MicroPython
 #   - HX711 + load cell
-#   - One or more ESC signal pins driven with identical PWM command
+#   - One ESC signal pin on GP14
 #   - Pixhawk TELEM2 MAVLink output wired to Pico UART RX for battery voltage/current
 #
 # Output CSV columns:
-#   t_ms,t_s,sweep_index,run_name,segment,pwm_us,
+#   t_ms,t_s,sweep_index,run_name,segment,pwm_us,throttle_pct,
 #   raw_count,tared_count,force_N,
 #   battery_voltage_V,battery_current_A,battery_remaining_pct,battery_age_ms,
 #   mavlink_total_packets,mavlink_sys_status_packets,mavlink_bad_frames,
@@ -19,11 +19,13 @@
 #   continuously, then advances to the next setpoint.
 #
 #   Hardware limits:
-#       - PWM_SAFE_US    = 1000  (disarmed / below spin)
+#       - PWM_SAFE_US     = 1000 (minimum/idle command)
 #       - PWM_HARD_MIN_US = 1100 (saturation below this: motor stalls / no thrust)
 #       - PWM_HARD_MAX_US = 1950 (saturation above this: ESC max, no further thrust gain)
 #
-#   Sweep range is 1000-2000 to observe the saturation boundaries explicitly.
+#   Default sweep range is configured by throttle percentage. Set
+#   DEFAULT_MAX_THROTTLE_PCT below; the PWM sweep stop, run label, and output
+#   filename are derived from that one value unless explicitly overridden.
 #
 # Structure note:
 #   This file is intentionally organized into functions so VS Code's Outline
@@ -31,21 +33,38 @@
 #
 #       main()
 #           print_startup_banner()
-#           setup_hardware()
+#           setup_hardware()  # ESC PWM is initialized before HX711/MAVLink
 #           tare_load_cell()
-#           arm_escs()
 #           run_all_sweeps()
 #           safe_shutdown()
 
 from machine import Pin, PWM, UART
 from utime import sleep, sleep_ms, ticks_ms, ticks_diff
 from hx711_gpio import HX711
-from lib.mavlink_battery import MavlinkBatteryReader
+try:
+    from lib.mavlink_battery import MavlinkBatteryReader
+except ImportError:
+    from mavlink_battery import MavlinkBatteryReader
+try:
+    from lib.load_cell_calibration import run_weight_calibration
+except ImportError:
+    from load_cell_calibration import run_weight_calibration
 
 
 # ============================================================
 # Configuration
 # ============================================================
+
+
+DEFAULT_MAX_THROTTLE_PCT = 50
+DEFAULT_ESC_PIN = 14
+
+
+def format_throttle_pct_label(throttle_pct):
+    throttle_pct = float(throttle_pct)
+    if throttle_pct == int(throttle_pct):
+        return "{}pct".format(int(throttle_pct))
+    return "{:.1f}pct".format(throttle_pct).replace(".", "p")
 
 
 def make_config():
@@ -59,7 +78,9 @@ def make_config():
         # ----------------------------------------------------
         # File / acquisition settings
         # ----------------------------------------------------
-        "LOG_FILE_BASE": "thrust_sweep_log",
+        # Leave as None to derive from MAX_THROTTLE_PCT and ESC_PINS after
+        # any orchestration overrides are loaded.
+        "LOG_FILE_BASE": None,
         "NUM_SWEEPS": 1,
         "COOLDOWN_BETWEEN_SWEEPS_MS": 30000,
         "RETARE_EACH_SWEEP": True,
@@ -73,17 +94,41 @@ def make_config():
         "SCALE_G_PER_COUNT": 0.002409592,
         "FORCE_SIGN": 1,
         "TARE_SAMPLES": 100,
-        "SAMPLES_RUN": 1,
+        "SAMPLES_RUN": 2,
         "TARE_SAMPLE_DELAY_MS": 20,
+
+        # Optional timed in-run calibration using known weights. Disabled: force
+        # uses SCALE_G_PER_COUNT above, which must hold the scale derived from
+        # the load_cell_characterization run.
+        "CALIBRATE_LOAD_CELL_WITH_WEIGHTS": False,
+        "CALIBRATION_MASSES_G": [50, 200],
+        "CALIBRATION_TARE_SAMPLES": 50,
+        "CALIBRATION_READ_SAMPLES_PER_MASS": 25,
+        "CALIBRATION_SAMPLE_DELAY_MS": 100,
+        "CALIBRATION_SETTLE_DELAY_MS": 1500,
+        "CALIBRATION_PLACEMENT_COUNTDOWN_S": 10,
 
         # ----------------------------------------------------
         # ESC / PWM settings
         # ----------------------------------------------------
-        "ESC_PINS": [13, 14],
+        "ESC_PINS": [DEFAULT_ESC_PIN],
         "ESC_FREQ_HZ": 50,
         "PWM_SAFE_US": 1000,
+        "PWM_MAX_US": 2000,
         "PWM_HARD_MIN_US": 1100,
         "PWM_HARD_MAX_US": 1950,
+
+        # ----------------------------------------------------
+        # Throttle-percent sweep settings
+        # ----------------------------------------------------
+        # Percent is mapped over PWM_SAFE_US..PWM_MAX_US, so 50% is 1500 us
+        # with the default 1000-2000 us ESC command span.
+        "USE_THROTTLE_PERCENT_SWEEP": True,
+        "MIN_THROTTLE_PCT": 0,
+        "MAX_THROTTLE_PCT": DEFAULT_MAX_THROTTLE_PCT,
+        "THROTTLE_STEP_PCT": 5,
+        "MIN_THROTTLE_SETTLE_MS": 1000,
+        "BATTERY_CONNECT_WAIT_MS": 12000,
 
         # ----------------------------------------------------
         # Pixhawk MAVLink battery telemetry settings
@@ -106,10 +151,10 @@ def make_config():
         # ----------------------------------------------------
         # Sweep parameters
         # ----------------------------------------------------
-        # Full range is 1000-2000 to capture saturation boundaries.
+        # Used only when USE_THROTTLE_PERCENT_SWEEP is False.
         "SWEEP_START_US": 1000,
-        "SWEEP_STOP_US": 2000,
-        "SWEEP_STEP_US": 25,
+        "SWEEP_STOP_US": 1300,
+        "SWEEP_STEP_US": 50,
         # Time to hold each PWM step while sampling.
         "DWELL_MS": 2000,
         # If True, also sweep back down to START after reaching STOP.
@@ -124,9 +169,7 @@ def make_config():
         # Each entry is (run_name,) — currently one global sweep.
         # Multiple entries allow different configurations in one file.
         # ----------------------------------------------------
-        "SWEEP_RUNS": [
-            "global_1000_2000",
-        ],
+        "SWEEP_RUNS": None,
 
         "PRINT_EVERY_N_SAMPLES": 50,
     }
@@ -190,6 +233,17 @@ def apply_external_config_if_present(cfg):
 
 
 def finalize_config(cfg):
+    if cfg.get("USE_THROTTLE_PERCENT_SWEEP", False):
+        cfg["SWEEP_START_US"] = throttle_pct_to_pwm_us(cfg, cfg["MIN_THROTTLE_PCT"])
+        cfg["SWEEP_STOP_US"] = throttle_pct_to_pwm_us(cfg, cfg["MAX_THROTTLE_PCT"])
+
+        step_us = throttle_pct_to_pwm_span_us(cfg, cfg["THROTTLE_STEP_PCT"])
+        if step_us <= 0:
+            raise ValueError("THROTTLE_STEP_PCT must produce a positive PWM step.")
+        cfg["SWEEP_STEP_US"] = step_us
+
+    apply_derived_run_names(cfg)
+
     cfg["SCALE_N_PER_COUNT"] = cfg["SCALE_G_PER_COUNT"] * 9.80665 / 1000.0
     return cfg
 
@@ -240,10 +294,55 @@ def clamp(value, lo, hi):
     return value
 
 
+def throttle_pct_to_pwm_span_us(cfg, throttle_pct):
+    span_us = cfg["PWM_MAX_US"] - cfg["PWM_SAFE_US"]
+    return int(span_us * float(throttle_pct) / 100.0)
+
+
+def throttle_pct_to_pwm_us(cfg, throttle_pct):
+    throttle_pct = clamp(float(throttle_pct), 0.0, 100.0)
+    return cfg["PWM_SAFE_US"] + throttle_pct_to_pwm_span_us(cfg, throttle_pct)
+
+
+def pwm_us_to_throttle_pct(cfg, pwm_us):
+    span_us = cfg["PWM_MAX_US"] - cfg["PWM_SAFE_US"]
+    if span_us <= 0:
+        return 0.0
+    return 100.0 * (float(pwm_us) - cfg["PWM_SAFE_US"]) / float(span_us)
+
+
 def csv_value(value):
     if value is None:
         return ""
     return value
+
+
+def get_primary_esc_pin(cfg):
+    esc_pins = cfg.get("ESC_PINS", [DEFAULT_ESC_PIN])
+    if len(esc_pins) == 0:
+        return DEFAULT_ESC_PIN
+    return int(esc_pins[0])
+
+
+def apply_derived_run_names(cfg):
+    max_throttle_label = format_throttle_pct_label(cfg["MAX_THROTTLE_PCT"])
+    min_throttle_label = format_throttle_pct_label(cfg["MIN_THROTTLE_PCT"])
+    esc_pin = get_primary_esc_pin(cfg)
+
+    if cfg.get("LOG_FILE_BASE") is None:
+        cfg["LOG_FILE_BASE"] = "thrust_sweep_log_{}_gp{}".format(
+            max_throttle_label,
+            esc_pin,
+        )
+
+    if cfg.get("SWEEP_RUNS") is None:
+        cfg["SWEEP_RUNS"] = [
+            "gp{}_{}_{}".format(
+                esc_pin,
+                min_throttle_label,
+                max_throttle_label,
+            )
+        ]
 
 
 # ============================================================
@@ -256,10 +355,11 @@ def pwm_us_to_duty_u16(pwm_us):
 
 
 def set_pwm_us(cfg, escs, pwm_us):
-    pwm_us = clamp(int(pwm_us), cfg["PWM_SAFE_US"], 2000)
+    pwm_us = clamp(int(pwm_us), cfg["PWM_SAFE_US"], cfg["PWM_MAX_US"])
     duty = pwm_us_to_duty_u16(pwm_us)
     for esc in escs:
         esc.duty_u16(duty)
+    return pwm_us
 
 
 def setup_escs(cfg):
@@ -277,15 +377,19 @@ def setup_escs(cfg):
     return escs
 
 
-def arm_escs(cfg, escs):
-    countdown(
-        "Arming ESCs at safe PWM. Keep clear of motors/propellers.",
-        cfg["ARM_COUNTDOWN_S"],
-    )
+def wait_for_battery_after_min_throttle(cfg, escs):
+    min_pwm_us = set_pwm_us(cfg, escs, cfg["SWEEP_START_US"])
 
-    set_pwm_us(cfg, escs, cfg["PWM_SAFE_US"])
-    sleep_ms(cfg["ARM_TIME_MS"])
-    print("ESC arming complete.")
+    print()
+    print("Minimum throttle command is active before battery connection.")
+    print("  PWM:", min_pwm_us, "us")
+    print("  throttle_pct: {:.1f}".format(pwm_us_to_throttle_pct(cfg, min_pwm_us)))
+    sleep_ms(cfg["MIN_THROTTLE_SETTLE_MS"])
+
+    cooldown_countdown(
+        "Plug in battery now. Holding minimum throttle before acquisition.",
+        cfg["BATTERY_CONNECT_WAIT_MS"],
+    )
 
 
 # ============================================================
@@ -358,6 +462,23 @@ def retare_load_cell_quick(cfg, hx):
         delay_ms=cfg["TARE_SAMPLE_DELAY_MS"],
     )
     print("Set offset count:", offset_count)
+    return offset_count
+
+
+def maybe_calibrate_load_cell(cfg, hx):
+    if not cfg["CALIBRATE_LOAD_CELL_WITH_WEIGHTS"]:
+        return None
+
+    print()
+    print("Running timed load-cell weight calibration.")
+    print("Calibration masses (g):", cfg["CALIBRATION_MASSES_G"])
+
+    scale_g_per_count, offset_count = run_weight_calibration(hx, cfg)
+    cfg["SCALE_G_PER_COUNT"] = scale_g_per_count
+    cfg["SCALE_N_PER_COUNT"] = cfg["SCALE_G_PER_COUNT"] * 9.80665 / 1000.0
+
+    print("Updated SCALE_G_PER_COUNT:", cfg["SCALE_G_PER_COUNT"])
+    print("Updated SCALE_N_PER_COUNT:", cfg["SCALE_N_PER_COUNT"])
     return offset_count
 
 
@@ -460,7 +581,7 @@ def make_log_filename(cfg, sweep_index):
 
 def write_csv_header(f):
     f.write(
-        "t_ms,t_s,sweep_index,run_name,segment,pwm_us,"
+        "t_ms,t_s,sweep_index,run_name,segment,pwm_us,throttle_pct,"
         "raw_count,tared_count,force_N,"
         "battery_voltage_V,battery_current_A,battery_remaining_pct,battery_age_ms,"
         "mavlink_total_packets,mavlink_sys_status_packets,mavlink_bad_frames,"
@@ -479,6 +600,7 @@ def print_sample_status(cfg, sample_counter, sweep_index, phase, pwm_us, thrust_
         "sweep", sweep_index,
         "phase", phase,
         "pwm_us", int(pwm_us),
+        "throttle_pct", "{:.1f}".format(pwm_us_to_throttle_pct(cfg, pwm_us)),
         "force_N", thrust_N,
         "V", battery_voltage_V,
         "A", battery_current_A,
@@ -531,13 +653,14 @@ def write_sample(
     t_s = t_ms / 1000.0
 
     f.write(
-        "{},{:.3f},{},{},{},{},{:.3f},{:.3f},{:.6f},{},{},{},{},{},{},{},{},{},{}\n".format(
+        "{},{:.3f},{},{},{},{},{:.3f},{:.3f},{:.3f},{:.6f},{},{},{},{},{},{},{},{},{},{}\n".format(
             t_ms,
             t_s,
             int(sweep_index),
             run_name,
             segment,
             int(pwm_us),
+            pwm_us_to_throttle_pct(cfg, pwm_us),
             raw_count,
             tared_count,
             thrust_N,
@@ -855,8 +978,9 @@ def run_all_sweeps(cfg, hx, mav_batt, escs, offset_count):
 
 
 def setup_hardware(cfg):
-    hx = setup_hx711(cfg)
     escs = setup_escs(cfg)
+    wait_for_battery_after_min_throttle(cfg, escs)
+    hx = setup_hx711(cfg)
     mav_batt = setup_mavlink_battery(cfg)
     return hx, escs, mav_batt
 
@@ -889,9 +1013,19 @@ def print_startup_banner(cfg):
     print("SCALE_G_PER_COUNT:", cfg["SCALE_G_PER_COUNT"])
     print("SCALE_N_PER_COUNT:", cfg["SCALE_N_PER_COUNT"])
     print("FORCE_SIGN:", cfg["FORCE_SIGN"])
+    print("CALIBRATE_LOAD_CELL_WITH_WEIGHTS:", cfg["CALIBRATE_LOAD_CELL_WITH_WEIGHTS"])
+    print("CALIBRATION_MASSES_G:", cfg["CALIBRATION_MASSES_G"])
+    print("ESC pins:", cfg["ESC_PINS"])
+    print("PWM_SAFE_US:", cfg["PWM_SAFE_US"])
+    print("PWM_MAX_US:", cfg["PWM_MAX_US"])
 
     print()
     print("Sweep settings:")
+    print("  USE_THROTTLE_PERCENT_SWEEP:", cfg["USE_THROTTLE_PERCENT_SWEEP"])
+    print("  MIN_THROTTLE_PCT:", cfg["MIN_THROTTLE_PCT"])
+    print("  MAX_THROTTLE_PCT:", cfg["MAX_THROTTLE_PCT"])
+    print("  THROTTLE_STEP_PCT:", cfg["THROTTLE_STEP_PCT"])
+    print("  BATTERY_CONNECT_WAIT_MS:", cfg["BATTERY_CONNECT_WAIT_MS"])
     print("  SWEEP_START_US:", cfg["SWEEP_START_US"])
     print("  SWEEP_STOP_US:", cfg["SWEEP_STOP_US"])
     print("  SWEEP_STEP_US:", cfg["SWEEP_STEP_US"])
@@ -927,16 +1061,17 @@ def main():
 
         hx, escs, mav_batt = setup_hardware(cfg)
 
-        set_pwm_us(cfg, escs, cfg["PWM_SAFE_US"])
+        set_pwm_us(cfg, escs, cfg["SWEEP_START_US"])
         sleep_ms(1000)
 
-        offset_count = tare_load_cell(
-            cfg,
-            hx,
-            "Prepare for initial tare: motors off, no added load on load cell.",
-        )
+        offset_count = maybe_calibrate_load_cell(cfg, hx)
 
-        arm_escs(cfg, escs)
+        if offset_count is None:
+            offset_count = tare_load_cell(
+                cfg,
+                hx,
+                "Prepare for initial tare: motors off, no added load on load cell.",
+            )
 
         saved_files = run_all_sweeps(
             cfg=cfg,

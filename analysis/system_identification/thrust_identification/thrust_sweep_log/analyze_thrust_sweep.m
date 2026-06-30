@@ -28,15 +28,23 @@
 %   Hysteresis check:
 %       Compare up-sweep vs down-sweep mean thrust at each setpoint.
 
-clear; clc; close all;
+clearvars -except DATASET_STATUS FILE_SELECTION DATA_FILES SAVE_FIGURES;
+clc; close all;
 
 %% User options
 
-SAVE_FIGURES = true;
+if ~exist("DATASET_STATUS", "var"), DATASET_STATUS = "candidate"; end
+if ~exist("FILE_SELECTION", "var"), FILE_SELECTION = "latest"; end  % "latest", "all", or "manual"
+if ~exist("DATA_FILES", "var"), DATA_FILES = strings(0, 1); end
+if ~exist("SAVE_FIGURES", "var"), SAVE_FIGURES = true; end
 
-runNames = [
-    "global_1000_2000"
-];
+% Older CSVs did not log throttle_pct. These bounds reproduce the firmware
+% mapping when throttle_pct must be reconstructed from pwm_us.
+PWM_SAFE_US = 1000;
+PWM_MAX_US = 2000;
+
+% Run names are auto-detected from the selected CSVs after loading.
+runNames = strings(0, 1);
 
 %% Saturation limits (informational — used for plot markers only)
 
@@ -59,6 +67,9 @@ LINEARITY_RANGES = [1075, 1650; 1650, 1950];
 %% Plot toggles
 
 PLOT_STATIC_CURVE           = true;   % mean ± std thrust vs PWM
+PLOT_STATIC_CURVE_THROTTLE  = true;   % mean and uncertainty vs throttle_pct
+PLOT_RAW_SCATTER            = true;   % raw thrust samples colored by PWM
+PLOT_UNCERTAINTY_WIDTH      = true;   % uncertainty half-width vs throttle_pct
 PLOT_HYSTERESIS             = true;   % up vs down sweep overlay
 PLOT_POLYNOMIAL_FIT         = true;   % polynomial fit over linear region
 PLOT_REPEATABILITY_OVERLAY  = true;   % one curve per CSV file
@@ -69,11 +80,12 @@ PLOT_SAMPLE_TIME_DIAGNOSTIC = false;
 %% Locate mirrored folders
 
 scriptPath = mfilename("fullpath");
+repoRoot = findRepoRoot(scriptPath);
+addpath(fullfile(repoRoot, "analysis", "utils"));
 
-dataDir = getMirroredRawDataDir(scriptPath, "candidate");
+dataDir = getMirroredRawDataDir(scriptPath, DATASET_STATUS);
 plotDir = getMirroredPlotDir(scriptPath);
-
-addpath(genpath(fullfile(findRepoRoot(scriptPath), "analysis", "util")));
+processedDir = getMirroredProcessedDir(scriptPath);
 
 csvFiles = dir(fullfile(dataDir, "*.csv"));
 
@@ -81,17 +93,30 @@ if isempty(csvFiles)
     error("No CSV files found in:\n%s", dataDir);
 end
 
-[~, sortIdx] = sort(string({csvFiles.name}));
-csvFiles = csvFiles(sortIdx);
+dataFiles = selectDataFiles(csvFiles, FILE_SELECTION, DATA_FILES);
 
-fprintf("\nFound %d CSV file(s):\n", numel(csvFiles));
-for k = 1:numel(csvFiles)
-    fprintf("  %s\n", fullfile(csvFiles(k).folder, csvFiles(k).name));
+fprintf("\nThrust sweep analysis\n");
+fprintf("  Data folder: %s\n", dataDir);
+fprintf("  Dataset status: %s\n", DATASET_STATUS);
+fprintf("  File selection: %s\n", FILE_SELECTION);
+fprintf("  Selected CSV file(s): %d\n", numel(dataFiles));
+for k = 1:numel(dataFiles)
+    fprintf("  %s\n", fullfile(dataDir, dataFiles(k)));
 end
 
 %% Load and combine all CSVs
 
-Tall = readCombinedCsvTables(csvFiles);
+Tall = readCombinedCsvTables(dataDir, dataFiles, PWM_SAFE_US, PWM_MAX_US);
+
+if isempty(runNames)
+    runNames = unique(string(Tall.run_name), "stable");
+    runNames(strlength(runNames) == 0) = [];
+end
+
+if isempty(runNames)
+    runNames = "all_runs";
+    Tall.run_name = repmat(runNames, height(Tall), 1);
+end
 
 %% Main analysis loop over run names
 
@@ -242,9 +267,30 @@ for r = 1:numel(runNames)
 
     %% Static thrust curve (all data, mean ± std)
 
+    if PLOT_RAW_SCATTER && height(D) > 0
+        figure("Color", "k");
+        scatter(D.throttle_pct, D.force_N, 14, D.pwm_us, "filled", ...
+            "MarkerFaceAlpha", 0.45, "MarkerEdgeAlpha", 0.45);
+        grid on;
+        cb = colorbar;
+        cb.Label.String = "PWM command (\mus)";
+        colormap("turbo");
+        xlabel("Throttle command (%)");
+        ylabel("Thrust (N)");
+        title("Raw Thrust Samples - " + runName, "Interpreter", "none");
+        styleDarkAxes(gca);
+    end
+
     if PLOT_STATIC_CURVE && height(statsAll) > 0
-        figure;
+        figure("Color", "k");
         hold on; grid on;
+
+        drawUncertaintyBand(statsAll.pwm_us, ...
+            statsAll.lower_prediction95_N, statsAll.upper_prediction95_N, ...
+            [0.0 0.9 1.0], 0.16, "95% sample spread");
+        drawUncertaintyBand(statsAll.pwm_us, ...
+            statsAll.lower_mean_ci95_N, statsAll.upper_mean_ci95_N, ...
+            [0.45 1.0 0.45], 0.24, "95% mean CI");
 
         errorbar(statsAll.pwm_us, statsAll.mean_force_N, statsAll.std_force_N, ...
             "o", "Color", [0.85 0.85 0.85], "LineWidth", 1.2, "DisplayName", "Mean ± std (all sweeps)");
@@ -257,7 +303,47 @@ for r = 1:numel(runNames)
         xlabel("PWM command (\mus)");
         ylabel("Thrust (N)");
         title("Static Thrust Curve - " + runName, "Interpreter", "none");
-        legend("Location", "best", "Interpreter", "none");
+        legend("Location", "best", "Interpreter", "none", "TextColor", "w");
+        styleDarkAxes(gca);
+    end
+
+    if PLOT_STATIC_CURVE_THROTTLE && height(statsAll) > 0
+        figure("Color", "k");
+        hold on; grid on;
+
+        drawUncertaintyBand(statsAll.throttle_pct, ...
+            statsAll.lower_prediction95_N, statsAll.upper_prediction95_N, ...
+            [0.0 0.9 1.0], 0.16, "95% sample spread");
+        drawUncertaintyBand(statsAll.throttle_pct, ...
+            statsAll.lower_mean_ci95_N, statsAll.upper_mean_ci95_N, ...
+            [0.45 1.0 0.45], 0.24, "95% mean CI");
+        errorbar(statsAll.throttle_pct, statsAll.mean_force_N, statsAll.mean_ci95_halfwidth_N, ...
+            "o-", "Color", [1.0 0.65 0.0], "MarkerFaceColor", [1.0 0.65 0.0], ...
+            "LineWidth", 1.4, "DisplayName", "Mean thrust");
+
+        xlabel("Throttle command (%)");
+        ylabel("Thrust (N)");
+        title("Static Thrust Lookup vs Throttle - " + runName, "Interpreter", "none");
+        legend("Location", "best", "Interpreter", "none", "TextColor", "w");
+        styleDarkAxes(gca);
+    end
+
+    if PLOT_UNCERTAINTY_WIDTH && height(statsAll) > 0
+        figure("Color", "k");
+        hold on; grid on;
+
+        plot(statsAll.throttle_pct, statsAll.mean_ci95_halfwidth_N, "o-", ...
+            "Color", [0.45 1.0 0.45], "LineWidth", 1.4, ...
+            "DisplayName", "95% mean CI half-width");
+        plot(statsAll.throttle_pct, statsAll.prediction95_halfwidth_N, "s-", ...
+            "Color", [0.0 0.9 1.0], "LineWidth", 1.4, ...
+            "DisplayName", "95% sample spread half-width");
+
+        xlabel("Throttle command (%)");
+        ylabel("Half-width (N)");
+        title("Static Lookup Uncertainty Width - " + runName, "Interpreter", "none");
+        legend("Location", "best", "Interpreter", "none", "TextColor", "w");
+        styleDarkAxes(gca);
     end
 
     %% Hysteresis plot
@@ -488,11 +574,33 @@ for r = 1:numel(runNames)
 
     summaryVars = {'pwm_us', 'mean_force_N', 'std_force_N', 'n_samples'};
 
+    if ismember("throttle_pct", string(statsAll.Properties.VariableNames))
+        summaryVars = [{'pwm_us', 'throttle_pct'}, setdiff(summaryVars, {'pwm_us'}, 'stable')];
+    end
+
+    uncertaintyVars = { ...
+        'sem_force_N', ...
+        'mean_ci95_halfwidth_N', ...
+        'prediction95_halfwidth_N', ...
+        'lower_mean_ci95_N', ...
+        'upper_mean_ci95_N', ...
+        'lower_prediction95_N', ...
+        'upper_prediction95_N' ...
+    };
+
+    for uv = 1:numel(uncertaintyVars)
+        if ismember(uncertaintyVars{uv}, string(statsAll.Properties.VariableNames))
+            summaryVars{end+1} = uncertaintyVars{uv};
+        end
+    end
+
     if hasVolt && ismember("mean_voltage_V", string(statsAll.Properties.VariableNames))
         summaryVars{end+1} = 'mean_voltage_V';
     end
 
     disp(statsAll(:, summaryVars));
+
+    writeLookupArtifacts(statsAll, D, processedDir, runName);
 
 end
 
@@ -501,6 +609,30 @@ end
 saveAllFiguresIfEnabled(SAVE_FIGURES, plotDir);
 
 %% Local helper functions
+
+function dataFiles = selectDataFiles(csvFiles, fileSelection, manualFiles)
+    fileSelection = string(fileSelection);
+
+    switch fileSelection
+        case "latest"
+            [~, newestIdx] = max([csvFiles.datenum]);
+            dataFiles = string(csvFiles(newestIdx).name);
+
+        case "all"
+            [~, sortIdx] = sort(string({csvFiles.name}));
+            dataFiles = string({csvFiles(sortIdx).name});
+
+        case "manual"
+            dataFiles = string(manualFiles);
+            if isempty(dataFiles)
+                error("FILE_SELECTION='manual' requires DATA_FILES to contain CSV file names.");
+            end
+
+        otherwise
+            error("FILE_SELECTION must be 'latest', 'all', or 'manual'.");
+    end
+end
+
 
 function D = getSweepData(T, runName)
     if isempty(T)
@@ -521,6 +653,12 @@ function D = getSweepData(T, runName)
     D.force_N = forceNumeric(D.force_N);
     D.t_ms    = forceNumeric(D.t_ms);
 
+    if ismember("throttle_pct", string(D.Properties.VariableNames))
+        D.throttle_pct = forceNumeric(D.throttle_pct);
+    else
+        D.throttle_pct = 100.0 * (D.pwm_us - 1000) / 1000;
+    end
+
     if ismember("battery_voltage_V", string(D.Properties.VariableNames))
         D.battery_voltage_V = forceNumeric(D.battery_voltage_V);
     end
@@ -529,7 +667,7 @@ function D = getSweepData(T, runName)
         D.battery_current_A = forceNumeric(D.battery_current_A);
     end
 
-    valid = isfinite(D.pwm_us) & isfinite(D.force_N);
+    valid = isfinite(D.pwm_us) & isfinite(D.throttle_pct) & isfinite(D.force_N);
     D = D(valid, :);
 
     if isempty(D)
@@ -564,8 +702,21 @@ function stats = computeSetpointStats(D, directionFilter)
 
     mean_force_N  = NaN(nPwm, 1);
     std_force_N   = NaN(nPwm, 1);
+    sem_force_N   = NaN(nPwm, 1);
+    mean_ci95_halfwidth_N = NaN(nPwm, 1);
+    lower_mean_ci95_N = NaN(nPwm, 1);
+    upper_mean_ci95_N = NaN(nPwm, 1);
+    prediction95_halfwidth_N = NaN(nPwm, 1);
+    lower_prediction95_N = NaN(nPwm, 1);
+    upper_prediction95_N = NaN(nPwm, 1);
+    p05_force_N = NaN(nPwm, 1);
+    p95_force_N = NaN(nPwm, 1);
+    min_force_N = NaN(nPwm, 1);
+    max_force_N = NaN(nPwm, 1);
     median_force_N = NaN(nPwm, 1);
     n_samples     = zeros(nPwm, 1);
+    n_files       = zeros(nPwm, 1);
+    throttle_pct  = NaN(nPwm, 1);
     mean_voltage_V = NaN(nPwm, 1);
 
     hasVolt = hasVoltage(D);
@@ -575,10 +726,31 @@ function stats = computeSetpointStats(D, directionFilter)
         y = D.force_N(idx);
         y = y(isfinite(y));
 
+        throttle_pct(i) = mean(D.throttle_pct(idx), "omitnan");
         mean_force_N(i)   = mean(y, "omitnan");
         std_force_N(i)    = std(y, "omitnan");
         median_force_N(i) = median(y, "omitnan");
         n_samples(i)      = numel(y);
+
+        if n_samples(i) > 0
+            sem_force_N(i) = std_force_N(i) / sqrt(n_samples(i));
+            mean_ci95_halfwidth_N(i) = 1.96 * sem_force_N(i);
+            lower_mean_ci95_N(i) = mean_force_N(i) - mean_ci95_halfwidth_N(i);
+            upper_mean_ci95_N(i) = mean_force_N(i) + mean_ci95_halfwidth_N(i);
+            prediction95_halfwidth_N(i) = 1.96 * std_force_N(i);
+            lower_prediction95_N(i) = mean_force_N(i) - prediction95_halfwidth_N(i);
+            upper_prediction95_N(i) = mean_force_N(i) + prediction95_halfwidth_N(i);
+            p05_force_N(i) = percentileNoToolbox(y, 5);
+            p95_force_N(i) = percentileNoToolbox(y, 95);
+            min_force_N(i) = min(y);
+            max_force_N(i) = max(y);
+        end
+
+        if ismember("source_file_index", string(D.Properties.VariableNames))
+            n_files(i) = numel(unique(D.source_file_index(idx)));
+        else
+            n_files(i) = 1;
+        end
 
         if hasVolt
             v = D.battery_voltage_V(idx);
@@ -587,26 +759,64 @@ function stats = computeSetpointStats(D, directionFilter)
         end
     end
 
-    stats = table(pwmValues, mean_force_N, std_force_N, median_force_N, n_samples, mean_voltage_V, ...
+    stats = table( ...
+        pwmValues, throttle_pct, mean_force_N, median_force_N, std_force_N, sem_force_N, ...
+        mean_ci95_halfwidth_N, lower_mean_ci95_N, upper_mean_ci95_N, ...
+        prediction95_halfwidth_N, lower_prediction95_N, upper_prediction95_N, ...
+        p05_force_N, p95_force_N, min_force_N, max_force_N, ...
+        n_samples, n_files, mean_voltage_V, ...
         'VariableNames', { ...
             'pwm_us', ...
+            'throttle_pct', ...
             'mean_force_N', ...
-            'std_force_N', ...
             'median_force_N', ...
+            'std_force_N', ...
+            'sem_force_N', ...
+            'mean_ci95_halfwidth_N', ...
+            'lower_mean_ci95_N', ...
+            'upper_mean_ci95_N', ...
+            'prediction95_halfwidth_N', ...
+            'lower_prediction95_N', ...
+            'upper_prediction95_N', ...
+            'p05_force_N', ...
+            'p95_force_N', ...
+            'min_force_N', ...
+            'max_force_N', ...
             'n_samples', ...
+            'n_files', ...
             'mean_voltage_V' ...
         });
 end
 
-function T = readCombinedCsvTables(csvFileStruct)
-    tables = cell(numel(csvFileStruct), 1);
+function T = readCombinedCsvTables(dataDir, dataFiles, pwmSafeUs, pwmMaxUs)
+    tables = cell(numel(dataFiles), 1);
     allVarNames = strings(0, 1);
 
-    for k = 1:numel(csvFileStruct)
-        thisPath = fullfile(csvFileStruct(k).folder, csvFileStruct(k).name);
+    for k = 1:numel(dataFiles)
+        thisPath = fullfile(dataDir, dataFiles(k));
+        if ~isfile(thisPath)
+            error("Selected CSV not found:\n%s", thisPath);
+        end
+
         Tk = readtable(thisPath);
 
-        Tk.source_file = repmat(string(csvFileStruct(k).name), height(Tk), 1);
+        if ~ismember("run_name", string(Tk.Properties.VariableNames))
+            Tk.run_name = repmat("all_runs", height(Tk), 1);
+        end
+
+        if ~ismember("phase", string(Tk.Properties.VariableNames))
+            Tk.phase = repmat("sweep", height(Tk), 1);
+        end
+
+        if ~ismember("direction", string(Tk.Properties.VariableNames))
+            Tk.direction = repmat("none", height(Tk), 1);
+        end
+
+        if ~ismember("throttle_pct", string(Tk.Properties.VariableNames))
+            Tk.throttle_pct = 100.0 * (forceNumeric(Tk.pwm_us) - pwmSafeUs) / (pwmMaxUs - pwmSafeUs);
+        end
+
+        Tk.source_file = repmat(string(dataFiles(k)), height(Tk), 1);
         Tk.source_file_index = repmat(k, height(Tk), 1);
 
         tables{k} = Tk;
@@ -640,6 +850,86 @@ end
 function tf = hasVoltage(D)
     tf = ismember("battery_voltage_V", string(D.Properties.VariableNames)) && ...
          any(isfinite(forceNumeric(D.battery_voltage_V)));
+end
+
+function writeLookupArtifacts(statsAll, D, processedDir, runName)
+    safeRunName = matlab.lang.makeValidName(char(runName));
+
+    lookupPath = fullfile(processedDir, "thrust_static_lookup_" + string(safeRunName) + ".csv");
+    samplePath = fullfile(processedDir, "thrust_static_samples_" + string(safeRunName) + ".csv");
+    matPath = fullfile(processedDir, "thrust_static_lookup_" + string(safeRunName) + ".mat");
+
+    writetable(statsAll, lookupPath);
+    writetable(D, samplePath);
+    save(matPath, "statsAll", "D");
+
+    fprintf("\nWrote processed lookup artifacts for %s:\n", runName);
+    fprintf("  %s\n", lookupPath);
+    fprintf("  %s\n", samplePath);
+    fprintf("  %s\n", matPath);
+end
+
+function drawUncertaintyBand(x, yLo, yHi, color, alphaValue, label)
+    valid = isfinite(x) & isfinite(yLo) & isfinite(yHi);
+    x = x(valid);
+    yLo = yLo(valid);
+    yHi = yHi(valid);
+
+    if numel(x) < 2
+        return;
+    end
+
+    fill([x; flipud(x)], [yLo; flipud(yHi)], color, ...
+        "FaceAlpha", alphaValue, "EdgeColor", "none", ...
+        "DisplayName", label);
+end
+
+function q = percentileNoToolbox(x, pct)
+    x = sort(x(isfinite(x)));
+
+    if isempty(x)
+        q = NaN;
+        return;
+    end
+
+    if numel(x) == 1
+        q = x(1);
+        return;
+    end
+
+    rank = 1 + (pct / 100) * (numel(x) - 1);
+    lo = floor(rank);
+    hi = ceil(rank);
+
+    if lo == hi
+        q = x(lo);
+    else
+        q = x(lo) + (rank - lo) * (x(hi) - x(lo));
+    end
+end
+
+function processedDir = getMirroredProcessedDir(scriptPath)
+    scriptDir = fileparts(scriptPath);
+    repoRoot = findRepoRoot(scriptDir);
+    relativeAnalysisDir = getRelativeAnalysisDir(scriptPath);
+    processedDir = fullfile(repoRoot, "data", "processed", relativeAnalysisDir);
+
+    if ~isfolder(processedDir)
+        mkdir(processedDir);
+    end
+end
+
+function styleDarkAxes(ax)
+    ax.Color = "k";
+    ax.XColor = "w";
+    ax.YColor = "w";
+    ax.GridColor = [0.8 0.8 0.8];
+    ax.MinorGridColor = [0.5 0.5 0.5];
+    ax.GridAlpha = 0.28;
+    ax.MinorGridAlpha = 0.18;
+    ax.Title.Color = "w";
+    ax.XLabel.Color = "w";
+    ax.YLabel.Color = "w";
 end
 
 function x = forceNumeric(x)

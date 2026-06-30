@@ -1,20 +1,35 @@
 {
   "orchestration_version": 1,
-  "description": "Two static thrust sweeps (1000-2000 us, bidirectional) for repeatability.",
+  "description": "One GP14 static thrust sweep using the throttle range defined in thrust_sweep_log.py, with MAVLink battery telemetry.",
   "remote_config_path": "run_config.json",
   "write_manifest": false,
+  "uploads": [
+    {
+      "local": "firmware/pico_micropython/lib/hx711_gpio.py",
+      "remote": "hx711_gpio.py"
+    },
+    {
+      "local": "firmware/pico_micropython/lib/mavlink_battery.py",
+      "remote": "mavlink_battery.py"
+    },
+    {
+      "local": "firmware/pico_micropython/lib/load_cell_calibration.py",
+      "remote": "load_cell_calibration.py"
+    }
+  ],
 
   "segments": [
     {
-      "name": "sweep_01",
+      "name": "gp14_thrust_sweep",
       "config": {
-        "LOG_FILE_BASE": "thrust_sweep_log"
-      }
-    },
-    {
-      "name": "sweep_02",
-      "config": {
-        "LOG_FILE_BASE": "thrust_sweep_log"
+        "NUM_SWEEPS": 1,
+        "ESC_PINS": [14],
+        "USE_THROTTLE_PERCENT_SWEEP": true,
+        "MIN_THROTTLE_PCT": 0,
+        "THROTTLE_STEP_PCT": 5,
+        "BATTERY_CONNECT_WAIT_MS": 12000,
+        "CALIBRATE_LOAD_CELL_WITH_WEIGHTS": true,
+        "CALIBRATION_MASSES_G": [50, 200]
       }
     }
   ]
