@@ -320,6 +320,12 @@ def parse_args():
     use_orchestration = True
     write_manifest = None
 
+    # Pico /lib is auto-synced to the repo before every run (fail-closed) so a
+    # stale on-device library can never silently run. --no-sync skips it;
+    # --sync-deep hashes the actual Pico files instead of trusting the manifest.
+    sync_enabled = "--no-sync" not in sys.argv
+    sync_deep = "--sync-deep" in sys.argv
+
     if "--manifest" in sys.argv:
         write_manifest = True
 
@@ -343,7 +349,15 @@ def parse_args():
     if "--no-orchestrate" in sys.argv:
         use_orchestration = False
 
-    return pico_script_path, port, plan_path, use_orchestration, write_manifest
+    return (
+        pico_script_path,
+        port,
+        plan_path,
+        use_orchestration,
+        write_manifest,
+        sync_enabled,
+        sync_deep,
+    )
 
 def make_unique_local_csv_path(output_dir, remote_csv_name):
     """
@@ -861,7 +875,15 @@ def run_orchestrated_mode(pico_script_path, plan_path, port, output_dir, cli_wri
 
 
 def main():
-    pico_script_path, port, cli_plan_path, use_orchestration, cli_write_manifest = parse_args()
+    (
+        pico_script_path,
+        port,
+        cli_plan_path,
+        use_orchestration,
+        cli_write_manifest,
+        sync_enabled,
+        sync_deep,
+    ) = parse_args()
 
     if not pico_script_path.exists():
         raise FileNotFoundError(f"Pico script not found: {pico_script_path}")
@@ -881,6 +903,17 @@ def main():
         port = find_pico_port()
     else:
         print(f"Using manually specified Pico port: {port}")
+
+    # Guarantee the Pico's /lib matches the repo before running anything. This
+    # is fail-closed: ensure_pico_in_sync raises if it cannot reconcile, which
+    # aborts the run rather than executing against stale on-device libraries.
+    if sync_enabled:
+        from sync_pico import ensure_pico_in_sync
+
+        print("\nVerifying Pico /lib is in sync with the repo...")
+        ensure_pico_in_sync(port, deep=sync_deep)
+    else:
+        print("\nSkipping Pico /lib sync (--no-sync).")
 
     plan_path = cli_plan_path
 
