@@ -1,21 +1,36 @@
 # load_cell_live_read.py
-# Live HX711 load cell readout using the known calibration scale factor.
+# Live HX711 RAW-count readout for sanity / wiggle testing (NO calibration).
+#
+# Purpose:
+#   Tare once, then continuously stream the raw 24-bit HX711 count, a tared
+#   count, the peak-to-peak spread over a short rolling window, and a railed
+#   flag. This is the tool for a connection "wiggle test".
+#
+# Wiggle test procedure:
+#   1. Run this with no load and let it settle to a steady baseline.
+#   2. Gently wiggle ONE wire / connector at a time, watching the output:
+#        - the 4 load-cell bridge wires first (E+, E-, A+, A-) -- these set the
+#          analog value and are the prime suspect for railing / sign flips,
+#        - then DOUT, SCK, VCC, GND.
+#   3. A solid rig holds the count within a few hundred counts (small pp_window).
+#      If wiggling a specific wire spikes the count, rails it (flag RAILED),
+#      flips its sign, or triggers "READ ERROR (no response)", that wire/joint
+#      is the fault.
+#
+# Architecture:
+#   The HX711 power cycle + settle is handled inside HX711.__init__
+#   (lib/hx711_gpio.py -> power_cycle()), so there is no manual clock-low/settle
+#   here. No calibration scale is used -- this reports raw counts only.
 #
 # Wiring:
 #   HX711 DAT / DOUT -> GP20
 #   HX711 SCK / CLK  -> GP21
 #
-# Workflow:
-#   1. Run script.
-#   2. Script gives countdown to remove all load.
-#   3. Script tares the sensor.
-#   4. Script prints live mass_g and force_N at each sample.
-#   Press Ctrl+C to stop.
-#
-# Requires hx711_gpio.py to be present on the Pico filesystem.
+# Requires lib/hx711_gpio.py on the Pico (auto-synced by run_pico_and_pull.py).
+# Press Ctrl+C to stop.
 
 from machine import Pin
-from utime import sleep, sleep_ms, ticks_ms, ticks_diff
+from utime import sleep, sleep_ms
 from hx711_gpio import HX711
 
 
@@ -23,39 +38,28 @@ from hx711_gpio import HX711
 # Configuration
 # ============================================================
 
+HX711_DAT_PIN = 20
+HX711_SCK_PIN = 21
+HX711_GAIN = 128
 
-def make_config():
-    return {
-        # HX711 hardware
-        "HX711_DAT_PIN": 20,
-        "HX711_SCK_PIN": 21,
-        "HX711_GAIN": 128,
+# Tare
+DO_TARE = True
+TARE_SAMPLES = 50
+TARE_SAMPLE_DELAY_MS = 20
+TARE_COUNTDOWN_S = 5
 
-        # Calibration — from thrust_sweep_log / load_cell_calibration results.
-        # Positive force_sign means increasing counts = increasing load.
-        "SCALE_G_PER_COUNT": 0.002409592,
-        "FORCE_SIGN": 1,
+# Continuous readout
+READ_INTERVAL_MS = 100
+WINDOW_SAMPLES = 20            # rolling window for peak-to-peak
 
-        # Tare
-        "TARE_SAMPLES": 50,
-        "TARE_SAMPLE_DELAY_MS": 20,
-        "TARE_COUNTDOWN_S": 5,
-
-        # Continuous readout
-        "READ_INTERVAL_MS": 100,
-        "PRINT_EVERY_N_SAMPLES": 1,
-    }
-
-
-def finalize_config(cfg):
-    cfg["SCALE_N_PER_COUNT"] = cfg["SCALE_G_PER_COUNT"] * 9.80665 / 1000.0
-    return cfg
+# HX711 is a signed 24-bit ADC: full scale is +/-2^23.
+HX711_FULL_SCALE = 0x7FFFFF    # 8388607
+RAIL_THRESHOLD = 8000000       # |count| above this ~ railed (stuck-at-large symptom)
 
 
 # ============================================================
 # Helpers
 # ============================================================
-
 
 def countdown(message, seconds):
     print()
@@ -66,87 +70,99 @@ def countdown(message, seconds):
     print("Starting now.")
 
 
-def setup_hx711(cfg):
+def setup_hx711():
     print("Initializing HX711...")
-    print("DAT pin:", cfg["HX711_DAT_PIN"])
-    print("SCK pin:", cfg["HX711_SCK_PIN"])
+    print("DAT pin:", HX711_DAT_PIN)
+    print("SCK pin:", HX711_SCK_PIN)
 
-    data_pin = Pin(cfg["HX711_DAT_PIN"], Pin.IN)
-    clock_pin = Pin(cfg["HX711_SCK_PIN"], Pin.OUT)
+    data_pin = Pin(HX711_DAT_PIN, Pin.IN)
+    clock_pin = Pin(HX711_SCK_PIN, Pin.OUT)
 
-    clock_pin.value(0)
-    sleep_ms(750)
+    # HX711.__init__ forces a power cycle and settles the amplifier.
+    hx = HX711(clock_pin, data_pin, gain=HX711_GAIN)
 
-    hx = HX711(clock_pin, data_pin, gain=cfg["HX711_GAIN"])
+    print("HX711 internal GAIN code:", hx.GAIN, "(expect 1 for gain=128)")
+    if hx.GAIN != 1:
+        print("WARNING: expected internal GAIN == 1 for gain=128, got", hx.GAIN)
+
     print("HX711 initialized.")
     return hx
 
 
-def tare(cfg, hx):
-    countdown(
-        "Remove all load from load cell for tare.",
-        cfg["TARE_COUNTDOWN_S"],
-    )
+def safe_read(hx):
+    """Return the raw count, or None if the sensor did not respond. A None
+    during a wiggle test usually points at DOUT/SCK/power."""
+    try:
+        return hx.read()
+    except OSError as e:
+        print("READ ERROR (no response):", e)
+        return None
 
-    print("Taring with", cfg["TARE_SAMPLES"], "samples...")
+
+def tare(hx):
+    countdown("Remove all load from the load cell for tare.", TARE_COUNTDOWN_S)
+    print("Taring with", TARE_SAMPLES, "samples...")
+
     total = 0
-    for _ in range(cfg["TARE_SAMPLES"]):
-        total += hx.read()
-        sleep_ms(cfg["TARE_SAMPLE_DELAY_MS"])
+    good = 0
+    for _ in range(TARE_SAMPLES):
+        raw = safe_read(hx)
+        if raw is not None:
+            total += raw
+            good += 1
+        sleep_ms(TARE_SAMPLE_DELAY_MS)
 
-    offset_count = total / cfg["TARE_SAMPLES"]
-    print("Tare complete. Offset count:", offset_count)
-    return offset_count
+    if good == 0:
+        print("Tare failed: no valid samples. Offset set to 0.")
+        return 0
 
-
-def read_and_convert(cfg, hx, offset_count):
-    raw_count = hx.read()
-    tared_count = raw_count - offset_count
-    mass_g = cfg["FORCE_SIGN"] * tared_count * cfg["SCALE_G_PER_COUNT"]
-    force_N = cfg["FORCE_SIGN"] * tared_count * cfg["SCALE_N_PER_COUNT"]
-    return raw_count, tared_count, mass_g, force_N
+    offset = total / good
+    print("Tare complete. Offset count:", offset, "(", good, "valid samples )")
+    return offset
 
 
 # ============================================================
 # Main
 # ============================================================
 
-
 def main():
-    cfg = finalize_config(make_config())
-
-    print("Load cell live readout")
-    print("SCALE_G_PER_COUNT:", cfg["SCALE_G_PER_COUNT"])
-    print("SCALE_N_PER_COUNT:", cfg["SCALE_N_PER_COUNT"])
-    print("FORCE_SIGN:", cfg["FORCE_SIGN"])
+    print("Load cell RAW live readout (no calibration) - wiggle test tool")
 
     hx = None
-
     try:
-        hx = setup_hx711(cfg)
-        offset_count = tare(cfg, hx)
+        hx = setup_hx711()
+        offset = tare(hx) if DO_TARE else 0
 
         print()
-        print("Reading. Press Ctrl+C to stop.")
-        print("{:<8} {:<14} {:<14} {:<14} {:<14}".format(
-            "sample", "raw_count", "tared_count", "mass_g", "force_N"))
+        print("Reading raw counts. Wiggle ONE wire at a time. Ctrl+C to stop.")
+        print("{:<8} {:<14} {:<14} {:<12} {:<8}".format(
+            "sample", "raw_count", "tared_count", "pp_window", "flag"))
 
+        window = []
         sample = 0
 
         while True:
-            loop_start_ms = ticks_ms()
-
-            raw_count, tared_count, mass_g, force_N = read_and_convert(cfg, hx, offset_count)
+            raw = safe_read(hx)
             sample += 1
 
-            if sample % cfg["PRINT_EVERY_N_SAMPLES"] == 0:
-                print("{:<8} {:<14.0f} {:<14.0f} {:<14.3f} {:<14.6f}".format(
-                    sample, raw_count, tared_count, mass_g, force_N))
+            if raw is None:
+                # safe_read already printed the error; keep cadence.
+                sleep_ms(READ_INTERVAL_MS)
+                continue
 
-            elapsed_ms = ticks_diff(ticks_ms(), loop_start_ms)
-            remaining_ms = cfg["READ_INTERVAL_MS"] - elapsed_ms
-            if remaining_ms > 0:
-                sleep_ms(remaining_ms)
+            tared = raw - offset
+
+            window.append(raw)
+            if len(window) > WINDOW_SAMPLES:
+                window.pop(0)
+            pp = max(window) - min(window)
+
+            flag = "RAILED" if abs(raw) >= RAIL_THRESHOLD else "ok"
+
+            print("{:<8} {:<14.0f} {:<14.0f} {:<12.0f} {:<8}".format(
+                sample, raw, tared, pp, flag))
+
+            sleep_ms(READ_INTERVAL_MS)
 
     except KeyboardInterrupt:
         print("Stopped.")

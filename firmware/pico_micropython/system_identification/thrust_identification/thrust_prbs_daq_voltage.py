@@ -557,10 +557,8 @@ def setup_hx711():
     data_pin = Pin(HX711_DAT_PIN, Pin.IN)
     clock_pin = Pin(HX711_SCK_PIN, Pin.OUT)
 
-    # HX711 powers down if SCK is held high. Force low before initializing.
-    clock_pin.value(0)
-    sleep_ms(750)
-
+    # HX711.__init__ forces a power cycle and settles the amplifier, so no
+    # manual clock-low + settle is needed here.
     hx = HX711(clock_pin, data_pin, gain=HX711_GAIN)
     print("HX711 initialized.")
     return hx
