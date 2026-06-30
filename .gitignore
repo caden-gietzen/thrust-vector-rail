@@ -236,3 +236,6 @@ AA_notes.md
 
 # MATLAB scratch/temp scripts (local development only)
 test_*_temp.m
+
+# Project logs (local working notes / daily scans, not version-controlled)
+project_logs/
