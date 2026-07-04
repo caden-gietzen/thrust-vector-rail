@@ -3,20 +3,6 @@
   "description": "One GP14 static thrust sweep using the throttle range defined in thrust_sweep_log.py, with MAVLink battery telemetry.",
   "remote_config_path": "run_config.json",
   "write_manifest": false,
-  "uploads": [
-    {
-      "local": "firmware/pico_micropython/lib/hx711_gpio.py",
-      "remote": "hx711_gpio.py"
-    },
-    {
-      "local": "firmware/pico_micropython/lib/mavlink_battery.py",
-      "remote": "mavlink_battery.py"
-    },
-    {
-      "local": "firmware/pico_micropython/lib/load_cell_calibration.py",
-      "remote": "load_cell_calibration.py"
-    }
-  ],
 
   "segments": [
     {

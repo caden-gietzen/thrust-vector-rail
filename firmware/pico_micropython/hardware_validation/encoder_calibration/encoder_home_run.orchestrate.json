@@ -1,14 +1,4 @@
 {
-  "uploads": [
-    {
-      "local": "firmware/pico_micropython/lib/servo_static_map.py",
-      "remote": "lib/servo_static_map.py"
-    },
-    {
-      "local": "firmware/pico_micropython/lib/encoder_home.py",
-      "remote": "lib/encoder_home.py"
-    }
-  ],
   "segments": [
     {
       "name": "homing",
