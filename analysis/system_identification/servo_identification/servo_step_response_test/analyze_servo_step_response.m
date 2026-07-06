@@ -14,20 +14,27 @@
 %   - ONE figure: measured angle vs static-map command angle (vs time)
 %   - A concise printed RECON / VALIDITY summary
 %
-% Data: servo_step_response_test.py CSVs (phase, case_label, time_since_step_s,
-% theta_deg, theta_cmd_deg, step_start_us/step_end_us all logged).
+% Data: servo_step_response_test.py compact CSVs:
+%   t_s, case_idx, case_label, rep_idx, phase,
+%   step_start_us, step_end_us, servo_us, theta_cmd_deg,
+%   count_delta, time_since_step_s
+%
+% Older diagnostic CSVs with theta_deg / theta_rad / count_zero columns are still
+% accepted; measured angle is recomputed from count_delta when available.
 
 clear; clc; close all;
 
 %% User Options
 
 DATASET_STATUS = "candidate";   % candidate | accepted | rejected | diagnostics
-ANALYZE_MODE   = "all";      % latest | single | all (latest -> one figure)
+ANALYZE_MODE   = "latest";      % latest | single | all (latest -> one figure)
 dataFile       = "servo_step_response_test.csv";   % used only when mode = single
 
 % Static command-to-angle gain from the shared static-map util (single source of
 % truth; identified by analyze_servo_static_sweep.m).
-STATIC_GAIN_DEG_PER_US = servoStaticMap().gain_deg_per_us;
+STATIC_MAP = servoStaticMap();
+STATIC_GAIN_DEG_PER_US = STATIC_MAP.gain_deg_per_us;
+SERVO_CENTER_US = STATIC_MAP.neutral_command_us;
 
 % Encoder count-to-angle scale from the shared spec-derived util (single source of
 % truth). Measured angle is recomputed from raw count_delta through this, rather
@@ -77,7 +84,8 @@ stepRows = table();   % one row per step segment (compact)
 
 for fileIdx = 1:numel(dataFiles)
 
-    D = loadStepFile(fullfile(dataDir, dataFiles(fileIdx)), STATIC_GAIN_DEG_PER_US, DEG_PER_COUNT);
+    D = loadStepFile(fullfile(dataDir, dataFiles(fileIdx)), ...
+                     STATIC_GAIN_DEG_PER_US, SERVO_CENTER_US, DEG_PER_COUNT);
 
     % --- The one figure: measured vs static-map command angle ---
     figure("Color", "k");
@@ -202,7 +210,7 @@ end
 
 %% Local Functions
 
-function D = loadStepFile(dataPath, staticGain, degPerCount)
+function D = loadStepFile(dataPath, staticGain, servoCenterUs, degPerCount)
     opts = detectImportOptions(dataPath, "FileType", "text", "Delimiter", ",", ...
                                "VariableNamingRule", "preserve");
     T = readtable(dataPath, opts);
@@ -233,12 +241,16 @@ function D = loadStepFile(dataPath, staticGain, degPerCount)
     else
         [~, ~, case_idx] = unique([T.step_start_us, T.step_end_us], "rows", "stable");
     end
-    % Command angle from the static-map truth gain, referenced to each step's own
-    % start command so the intercept cancels (binning only uses command deltas).
+    % Command angle from the MATLAB static-map truth source. Do not trust the
+    % device-computed column for plotting; keep it only as a CSV contract check.
+    theta_cmd_deg = staticGain * (T.servo_us - servoCenterUs);
     if ismember("theta_cmd_deg", string(T.Properties.VariableNames))
-        theta_cmd_deg = T.theta_cmd_deg;
-    else
-        theta_cmd_deg = staticGain * T.servo_us;   % intercept cancels in deltas
+        csvThetaCmdDeg = T.theta_cmd_deg;
+        maxCmdMismatchDeg = max(abs(csvThetaCmdDeg - theta_cmd_deg), [], "omitnan");
+        if isfinite(maxCmdMismatchDeg) && maxCmdMismatchDeg > 0.05
+            warning("CSV theta_cmd_deg differs from servoStaticMap() by up to %.3f deg in %s.", ...
+                    maxCmdMismatchDeg, dataPath);
+        end
     end
 
     D = table(T.t_s, T.servo_us, theta_deg, theta_cmd_deg, string(T.phase), ...
