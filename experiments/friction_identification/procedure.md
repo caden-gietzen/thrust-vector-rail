@@ -24,7 +24,7 @@ Stiction is identified from the same campaign: the lowest ESC command level that
 
 | Prerequisite | Parameters | Reference |
 |---|---|---|
-| Servo dynamic model | $K_{servo} = 0.001556$ rad/µs, $\tau_{servo} = 24.4$ ms, $L_{servo} = 28.8$ ms, $u_{neutral} = 1431$ µs | [`experiments/servo_identification/results.md`](../servo_identification/results.md) |
+| Servo dynamic model | $K_{servo} = 0.001618$ rad/µs, $\tau_{servo} = 17.1$ ms, $L_{servo} = 13.4$ ms, $u_{neutral} = 1428$ µs (upgraded servo, ±15° rung) | [`experiments/servo_identification/results.md`](../servo_identification/results.md) |
 | Thrust dynamic model | $K_T = 0.00414$ N/µs, $\tau_T = 78.1$ ms, $L_T = 25.2$ ms, dead zone $u < 1075$ µs | [`experiments/thrust_identification/results.md`](../thrust_identification/results.md) |
 | Encoder calibration | $C_m = 64{,}810.4$ counts/m (8.02% above nominal; do **not** use nominal 60,000) | [`experiments/encoder_calibration/results.md`](../encoder_calibration/results.md) |
 | Vehicle mass | $M = 0.4536$ kg (1 lb nominal), $\sigma_M = 0.136$ kg (±0.3 lb) | Weigh before each test campaign |
@@ -32,7 +32,7 @@ Stiction is identified from the same campaign: the lowest ESC command level that
 ### Servo model — plugged-in form
 
 $$
-G_{servo}(s) = \frac{0.001556}{1 + 0.0244\,s}\,e^{-0.0288\,s} \quad [\text{rad/µs}]
+G_{servo}(s) = \frac{0.001618}{1 + 0.0171\,s}\,e^{-0.0134\,s} \quad [\text{rad/µs}]
 $$
 
 Static relationship (for angle-to-command conversion):

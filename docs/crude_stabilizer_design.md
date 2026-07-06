@@ -171,8 +171,16 @@ Three loop models are useful, in increasing order of realism:
    \frac{1}{s^2}\frac{1}{1+\tau_\theta s}e^{-L_\theta s}
    $$
 
-   using $\tau_\theta = 24.4~\text{ms}$ and $L_\theta = 28.8~\text{ms}$ from
+   using the servo lag and delay from
    [rough_truth_model.md](rough_truth_model.md).
+
+   > **⚠ Servo params updated 2026-07-06 — margins below pending recomputation.** The
+   > loop-margin figures in the remainder of this section were computed against the
+   > *superseded slow servo* ($\tau_\theta = 24.4~\text{ms}$, $L_\theta = 28.8~\text{ms}$).
+   > The canonical model is now the faster upgraded servo ($\tau_\theta = 17.1~\text{ms}$,
+   > $L_\theta = 13.4~\text{ms}$, ±15° rung). Because the new servo is *faster*, the phase
+   > margins below are **pessimistic** — the design is safe, but the specific numbers
+   > (crossover, PM) must be recomputed against the updated model before the next tuning pass.
 3. **Implemented-loop linearization.** This linearizes the actual
    [tvr_sim.slx](../tvr_stabilizer/tvr_sim.slx) loop with friction and measurement noise
    disabled, reference amplitude set to zero, the transport delay represented by a
@@ -384,7 +392,7 @@ The 500-case tracking sweep completed with no unstable simulations and no rail-l
 violations. Many cases briefly touched the servo command limit, but the saturation
 fraction stayed small. The strict tracking-success threshold is not yet met, which is
 acceptable for this phase: the crude stabilizer is a bootstrap controller for safe
-closed-loop data collection, not the final 2 mm precision controller.
+closed-loop data collection, not the final 15 mm / 7 mm (R4/R5) tracking controller.
 
 ---
 

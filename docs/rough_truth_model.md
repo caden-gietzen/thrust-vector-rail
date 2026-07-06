@@ -92,10 +92,10 @@ documented in [results.md §9](../experiments/servo_identification/results.md)).
 | Parameter | Symbol | Value | Source |
 |-----------|--------|-------|--------|
 | Vehicle mass | $m$ | 0.4536 kg (1 lb nominal), $\sigma_m = 0.136$ kg | measured; weigh before each campaign |
-| Servo DC gain | $K_\theta$ | 0.001556 rad/µs | [servo](../experiments/servo_identification/results.md) |
-| Servo time constant | $\tau_\theta$ | 24.4 ms | [servo](../experiments/servo_identification/results.md) |
-| Servo delay | $L_\theta$ | 28.8 ms | [servo](../experiments/servo_identification/results.md) |
-| Servo neutral command | $u_{\theta,0}$ | 1431 µs | [servo](../experiments/servo_identification/results.md) |
+| Servo DC gain | $K_\theta$ | 0.001618 rad/µs ($\pm15°$ rung; window 0.001618–0.001685) | [servo](../experiments/servo_identification/results.md) |
+| Servo time constant | $\tau_\theta$ | 17.1 ms (window 17.1–20.0 ms) | [servo](../experiments/servo_identification/results.md) |
+| Servo delay | $L_\theta$ | 13.4 ms (window 13.2–13.5 ms) | [servo](../experiments/servo_identification/results.md) |
+| Servo neutral command | $u_{\theta,0}$ | 1428 µs | [servo](../experiments/servo_identification/results.md) |
 | Thrust DC gain (global) | $K_T$ | 0.00414 N/µs | [thrust](../experiments/thrust_identification/results.md) |
 | Thrust time constant | $\tau_T$ | 78.1 ms | [thrust](../experiments/thrust_identification/results.md) |
 | Thrust delay | $L_T$ | 25.2 ms | [thrust](../experiments/thrust_identification/results.md) |
@@ -110,28 +110,41 @@ documented in [results.md §9](../experiments/servo_identification/results.md)).
 
 ### 4.1 Servo (thrust-vector angle)
 
-First-order-plus-delay, identified by PRPS frequency-domain fitting and validated against
-held-out data (worst-case ≤ 0.5 dB magnitude, ≤ 2.6° phase):
+> **Hardware note.** These are the **upgraded servo** (faster digital servo, swapped
+> 2026-06-29) parameters from the **amplitude-ladder** PRPS campaign (2026-07-02), which is
+> the canonical servo dynamic ID. It supersedes the earlier slow-servo two-band model
+> (K = 0.001479, τ = 29.9 ms, L = 35.4 ms) — that data is retained only as history in the
+> [servo results](../experiments/servo_identification/results.md).
+
+First-order-plus-delay, identified per angle-amplitude rung by PRPS frequency-domain fitting.
+Unlike the earlier two-band pass, the ladder linear blocks **measure through the ~9 Hz corner**
+(coherence edge 8.7–15 Hz per rung), so τ and the corner are measured, not extrapolated. The
+nominal is the $\pm15°$ operating-amplitude rung:
 
 $$
-G_\theta(s) = \frac{\theta(s)}{u_\theta(s)} = \frac{0.001556}{1 + 0.0244\,s}\,e^{-0.0288\,s} \quad [\text{rad}/\mu\text{s}]
+G_\theta(s) = \frac{\theta(s)}{u_\theta(s)} = \frac{0.001618}{1 + 0.0171\,s}\,e^{-0.0134\,s} \quad [\text{rad}/\mu\text{s}]
 $$
+
+The dominant uncertainty is **amplitude-dependence**: across the 5–15° rungs τ ranges 17.1–20.0 ms
+and $K_\theta$ ranges 0.001618–0.001685 rad/µs; L is stable at 13.2–13.5 ms. That min/max window
+is the Stage 2 servo uncertainty set (mirrored in the parameter store).
 
 Static command-to-angle map (for command ↔ angle conversion):
 
 $$
-\theta_\text{deg} = -0.091092\,(u_\theta - 1431) \quad\Longleftrightarrow\quad u_\theta = 1431 - \frac{\theta_\text{deg}}{0.091092}
+\theta_\text{deg} = -0.093996\,(u_\theta - 1428) \quad\Longleftrightarrow\quad u_\theta = 1428 - \frac{\theta_\text{deg}}{0.093996}
 $$
 
 | Property | Value | Note |
 |---|---|---|
-| Neutral command | 1431 µs | zero angle |
+| Neutral command | 1428 µs | zero angle |
 | Usable range | 450–2450 µs | ≈ ±90° vectoring |
-| Static gain | −0.00159 rad/µs | agrees with dynamic $K_\theta$ within 2% |
-| Hysteresis | ~2° mean, ~4° max | do not over-interpret sub-4° angle differences |
-| Phase lag at 1 Hz | ~19° | combined $\tau_\theta + L_\theta = 53$ ms |
+| Static gain | −0.00164 rad/µs | lash-free DC gain; agrees with dynamic $K_\theta$ within ~1.4% |
+| Backlash | ~0.39° | new servo; much tighter than the old ±2° |
+| Linear corner $f_c$ | 8.3–9.3 Hz | measured across the operating rungs |
+| Phase lag at 1 Hz | ~11° | combined $\tau_\theta + L_\theta = 30.5$ ms |
 
-The 28.8 ms transport delay is the binding constraint: it cannot be loop-shaped away and
+The 13.4 ms transport delay is the binding constraint: it cannot be loop-shaped away and
 sets a hard ceiling on closed-loop bandwidth (see [§6](#6-control-design-implications)).
 
 ### 4.2 Thrust (ESC → force)
@@ -232,8 +245,8 @@ maximal — the natural design point for the first stabilizer.
 
 | Constraint | Value | Consequence |
 |---|---|---|
-| Servo combined lag $\tau_\theta + L_\theta$ | 53 ms | hard bandwidth ceiling |
-| Servo phase lag at 1 Hz | ~19° | leaves ~26° margin at a 45° PM target |
+| Servo combined lag $\tau_\theta + L_\theta$ | 30.5 ms | hard bandwidth ceiling |
+| Servo phase lag at 1 Hz | ~11° | leaves ~34° margin at a 45° PM target |
 | Recommended initial rail bandwidth | **≤ 1 Hz** | conservative; do not target > 2 Hz |
 | Thrust lag at ≤ 0.3 Hz loop | < 3° phase | thrust ≈ static gain + delay at low BW |
 | Thrust-to-weight at 20° | 0.32 | low authority; saturation reachable |
@@ -258,8 +271,9 @@ closed-loop ID data.
   Stiction/breakaway near $v = 0$ is bracketed, not modelled.
 - The thrust static map is **nonlinear** and voltage-dependent; a single global gain hides
   a 76% regime-to-regime gain change and battery-sag drift.
-- Servo dynamics are **mildly amplitude-dependent** ($\tau_\theta$ grows from 15 ms to 34 ms
-  with excursion); the global model pools this away.
+- Servo dynamics are **amplitude-dependent** ($\tau_\theta$ runs 17.1 ms at $\pm15°$ up to
+  20.0 ms at $\pm5°$ across the ladder); the nominal is the $\pm15°$ rung and the amplitude
+  spread is carried as the servo uncertainty window rather than pooled away.
 
 These are exactly the discrepancies closed-loop ID is meant to surface and the refined
 "earned" model is meant to capture. **Do not trust this model past the point of getting a
