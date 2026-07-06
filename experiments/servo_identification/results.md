@@ -55,20 +55,54 @@ $$
 | 13 | 0.001630 | 19.3 | 13.2 | 8.27 | 10.0 |
 | **15** | **0.001618** | **17.1** | **13.4** | **9.32** | **8.7** |
 
-The dominant uncertainty is **amplitude-dependence**, not statistical scatter. The nominal is
-the ±15° rung; the **min/max across rungs is the Stage 2 uncertainty window** and is written
-verbatim into the parameter store
-([`identified_parameters.json`](../../data/processed/identified_parameters/identified_parameters.json)):
+### Uncertainty quantification
 
-| Param | Nominal (±15°) | Window (5–15° rungs) |
-|---|---:|---:|
-| $K_\theta$ (rad/µs) | 0.001618 | 0.001618 – 0.001685 |
-| $\tau_\theta$ (ms) | 17.1 | 17.1 – 20.0 |
-| $L_\theta$ (ms) | 13.4 | 13.2 – 13.5 |
+Two independent uncertainty tiers are reported, both derived from the same PRPS data by the
+analysis script (see [procedure.md](procedure.md) for the bootstrap mechanics):
 
-$L$ is effectively amplitude-invariant (13.2–13.5 ms). The lash-free static-map DC gain
-(−0.093996 deg/µs → 0.0016405 rad/µs) agrees with the dynamic $K_\theta$ within ~1.4% and
-falls inside the window — an independent cross-check of the operating-amplitude gain.
+- **Statistical — per-rung bootstrap.** Each rung's FOPD is bootstrapped by resampling whole
+  PRPS periods with replacement, stratified by realization, and refitting ($n = 200$ draws,
+  preserving the $K$–$\tau$–$L$ correlation). The 95% CIs come out **very tight** — at ±15°,
+  $\tau \in [17.1, 17.1]$ ms, $K_\theta \in [0.0016174, 0.0016185]$ — i.e. the parameters are
+  pinned by the data at each amplitude.
+- **Systematic — amplitude-dependence.** Across the 5–15° rungs the parameters move **far more
+  than** the per-rung CIs, so amplitude-dependence, not statistical scatter, is the dominant
+  uncertainty. The **min/max window across rungs is the Stage 2 uncertainty set**, written
+  verbatim into the parameter store
+  ([`identified_parameters.json`](../../data/processed/identified_parameters/identified_parameters.json)).
+
+| Param | Nominal (±15°) | Bootstrap 95% CI (±15°) | Amplitude window (5–15°) |
+|---|---:|---:|---:|
+| $K_\theta$ (rad/µs) | 0.001618 | 0.0016174 – 0.0016185 | 0.001618 – 0.001685 |
+| $\tau_\theta$ (ms) | 17.1 | 17.1 – 17.1 | 17.1 – 20.0 |
+| $L_\theta$ (ms) | 13.4 | 13.4 – 13.4 | 13.2 – 13.5 |
+
+That the amplitude window is roughly an order of magnitude wider than the bootstrap CI is the
+whole point: the robust stabilizer must cover the amplitude window, and it can because the
+statistical noise *within* each operating point is negligible. $L$ is effectively
+amplitude-invariant (13.2–13.5 ms). The lash-free static-map DC gain (−0.093996 deg/µs →
+0.0016405 rad/µs) agrees with the dynamic $K_\theta$ within ~1.4% and falls inside the window —
+an independent cross-check. The τ/L-vs-amplitude figure carries the bootstrap CIs as error bars,
+visually confirming the systematic-over-statistical separation.
+
+### Time-domain validation
+
+The chosen ±15° FOPD is translated to the time domain via `lsim` on a held-out ±15° realization
+(`ladder_a15_lin_r02`), each PRPS burst scored on its own grid with the `lsim` startup transient
+(first $\sim 3\tau + L$) excluded:
+
+| Metric | Value |
+|---|---:|
+| VAF | **99.9%** |
+| NRMSE-fit | 97.6% |
+
+The model overlays measured angle across the full ~30 s realization and the residual is bounded
+near the ±0.39° backlash floor with no systematic structure — the linear FOPD captures the
+dynamics and only sub-degree backlash/quantization remains. This is the time-domain confirmation
+of the frequency-domain FRF fit (coherence $\ge 0.9$ to 8.7 Hz, sub-dB in-band error), which is
+the formal acceptance metric.
+
+![Time-domain translation of the chosen servo FOPD vs measured angle](../../plots/system_identification/servo_identification/servo_prps_log/time-domain_translation_of_chosen_servo_fopd_vs_measured_angle.png)
 
 ### Requirement check
 
