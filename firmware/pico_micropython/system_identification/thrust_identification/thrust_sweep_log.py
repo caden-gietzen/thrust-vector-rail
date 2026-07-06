@@ -49,6 +49,10 @@ try:
     from lib.load_cell_calibration import run_weight_calibration
 except ImportError:
     from load_cell_calibration import run_weight_calibration
+try:
+    from lib.load_cell_health import probe_zero_load_health
+except ImportError:
+    from load_cell_health import probe_zero_load_health
 
 
 # ============================================================
@@ -107,6 +111,15 @@ def make_config():
         "CALIBRATION_SAMPLE_DELAY_MS": 100,
         "CALIBRATION_SETTLE_DELAY_MS": 1500,
         "CALIBRATION_PLACEMENT_COUNTDOWN_S": 10,
+
+        # Weightless per-run load-cell health probe. After tare/zero, log a short
+        # zero-load hold to a sidecar CSV (<LOG_FILE_BASE>_load_cell_health.csv)
+        # so every sweep dataset carries a noise/drift/dropout fingerprint that
+        # analysis can gate on. Catches intermittent HX711 connection issues.
+        "ENABLE_LOAD_CELL_HEALTH_PROBE": True,
+        "HEALTH_PROBE_SECONDS": 20,
+        "HEALTH_SAMPLE_DELAY_MS": 90,
+        "HEALTH_SETTLE_DELAY_MS": 1000,
 
         # ----------------------------------------------------
         # ESC / PWM settings
@@ -1072,6 +1085,11 @@ def main():
                 hx,
                 "Prepare for initial tare: motors off, no added load on load cell.",
             )
+
+        # Weightless per-run instrument-health fingerprint (motors still idle,
+        # no load). Logs a sidecar CSV pulled alongside the dataset.
+        if cfg.get("ENABLE_LOAD_CELL_HEALTH_PROBE", False):
+            probe_zero_load_health(hx, cfg)
 
         saved_files = run_all_sweeps(
             cfg=cfg,
