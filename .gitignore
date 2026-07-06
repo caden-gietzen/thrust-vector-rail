@@ -6,6 +6,9 @@ __pycache__/
 # Deprecated / retired files: preserved locally for reference, out of git.
 deprecated/
 
+# CAD / 3D-print source (local hardware design artifacts, not version-controlled)
+models/
+
 # C extensions
 *.so
 
