@@ -1,0 +1,48 @@
+{
+  "meta": {
+    "description": "Canonical identified-parameter store for the thrust-vector rail. Single source of truth consumed by tvr_stabilizer/params.m via analysis/utils/loadIdentifiedParams.m. Edit values HERE (or rerun analysis/utils/buildIdentifiedParams.m after an identification update). Each leaf carries value + units + uncertainty (sigma / ci) + provenance so the observer/feedforward pull nominal means and the later uncertainty-validation phase pulls the windows from the same place.",
+    "schema_version": 1,
+    "generated_from": "experiments/servo_identification/results.md (amplitude-ladder 2026-07-02, canonical) + thrust/friction/encoder results.md",
+    "date": "2026-07-06"
+  },
+
+  "servo": {
+    "K_theta":   {"value": 0.001618, "units": "rad/us", "sigma": null, "ci": [0.001618, 0.001685], "source": "amplitude-ladder 2026-07-02, +/-15deg operating rung (a15); window = min/max across rungs 5-15deg. Static-map lash-free DC gain 0.0016405 agrees within window.", "date": "2026-07-02"},
+    "tau_theta": {"value": 0.0171,   "units": "s",      "sigma": null, "ci": [0.0171, 0.0200], "source": "amplitude-ladder 2026-07-02, +/-15deg rung (measured through the ~9 Hz corner, coherence edge 8.7 Hz); window = min/max across rungs 5-15deg", "date": "2026-07-02"},
+    "L_theta":   {"value": 0.0134,   "units": "s",      "sigma": null, "ci": [0.0132, 0.0135], "source": "amplitude-ladder 2026-07-02 (stable 13.2-13.5 ms across all rungs)", "date": "2026-07-02"},
+    "neutral_us":{"value": 1428.0,    "units": "us",     "sigma": null, "ci": null, "source": "servoStaticMap.m", "date": "2026-06-29"},
+    "backlash_deg": {"value": 0.39,   "units": "deg",    "sigma": null, "ci": null, "source": "static sweep branch offset (new servo)", "date": "2026-06-29"},
+    "static_gain_deg_per_us": {"value": -0.093996, "units": "deg/us", "sigma": null, "ci": null, "source": "servoStaticMap.m", "date": "2026-06-29"}
+  },
+
+  "thrust": {
+    "K_T":   {"value": 0.00414, "units": "N/us", "sigma": null, "ci": null, "source": "thrust FOPD global fit", "date": "2026-06-30"},
+    "tau_T": {"value": 0.0781,  "units": "s",    "sigma": null, "ci": null, "source": "thrust FOPD global fit", "date": "2026-06-30"},
+    "L_T":   {"value": 0.0252,  "units": "s",    "sigma": null, "ci": null, "source": "thrust FOPD global fit", "date": "2026-06-30"},
+    "static_map": {
+      "center_us": 1525.0,
+      "scale_us": 256.2,
+      "coeffs_high_to_low": [1.828e-5, 0.053686, 0.17600, 1.06699, 1.74620],
+      "units": "N",
+      "range_us": [1075, 1950],
+      "range_N": [0.23, 4.17],
+      "source": "degree-4 static map, thrust results.md",
+      "date": "2026-06-30"
+    }
+  },
+
+  "friction": {
+    "mu_c": {"value": 1.0, "units": "N",     "sigma": null, "ci": [0.82, 1.0], "source": "residual-based ID (PROVISIONAL dummy; pre-2026-06-26-rebuild, not finalized)", "date": "2026-05-29"},
+    "b":    {"value": 2.3, "units": "N*s/m", "sigma": null, "ci": null,        "source": "residual-based ID (PROVISIONAL)", "date": "2026-05-29"},
+    "asym": {"value": 0.3, "units": "fraction", "sigma": null, "ci": [0.29, 0.42], "source": "directional asymmetry, friction results.md", "date": "2026-05-29"},
+    "model": "coulomb"
+  },
+
+  "mass": {
+    "m": {"value": 0.5, "units": "kg", "sigma": 0.136, "ci": null, "source": "design nominal; weigh per campaign (rough_truth_model.md lists 0.4536 kg / 1 lb)", "date": "2026-07-03"}
+  },
+
+  "encoder": {
+    "counts_per_m": {"value": 64810.4, "units": "counts/m", "sigma": null, "ci": null, "source": "encoder_calibration/results.md", "date": "2026-06-26"}
+  }
+}
