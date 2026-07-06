@@ -56,13 +56,13 @@ LIVE_READOUT_DELAY_MS = 150
 def make_calibration_config():
     return {
         "CALIBRATION_MASSES_G": [50, 200],
-        "CALIBRATION_TARE_SAMPLES": 25,
-        "CALIBRATION_READ_SAMPLES_PER_MASS": 20,
+        "CALIBRATION_TARE_SAMPLES": 50,
+        "CALIBRATION_READ_SAMPLES_PER_MASS": 40,
         "CALIBRATION_SAMPLE_DELAY_MS": 100,
         "CALIBRATION_SETTLE_DELAY_MS": 1500,
         "CALIBRATION_PLACEMENT_COUNTDOWN_S": 10,
         # Used by the final sweep re-tare inside run_weight_calibration.
-        "TARE_SAMPLES": 25,
+        "TARE_SAMPLES": 50,
         "TARE_SAMPLE_DELAY_MS": 100,
     }
 

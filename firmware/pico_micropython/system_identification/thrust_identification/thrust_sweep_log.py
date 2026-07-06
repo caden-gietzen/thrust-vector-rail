@@ -97,7 +97,7 @@ def make_config():
         "HX711_GAIN": 128,
         "SCALE_G_PER_COUNT": 0.002409592,
         "FORCE_SIGN": 1,
-        "TARE_SAMPLES": 100,
+        "TARE_SAMPLES": 200,
         "SAMPLES_RUN": 2,
         "TARE_SAMPLE_DELAY_MS": 20,
 
@@ -106,8 +106,8 @@ def make_config():
         # the load_cell_characterization run.
         "CALIBRATE_LOAD_CELL_WITH_WEIGHTS": False,
         "CALIBRATION_MASSES_G": [50, 200],
-        "CALIBRATION_TARE_SAMPLES": 50,
-        "CALIBRATION_READ_SAMPLES_PER_MASS": 25,
+        "CALIBRATION_TARE_SAMPLES": 100,
+        "CALIBRATION_READ_SAMPLES_PER_MASS": 50,
         "CALIBRATION_SAMPLE_DELAY_MS": 100,
         "CALIBRATION_SETTLE_DELAY_MS": 1500,
         "CALIBRATION_PLACEMENT_COUNTDOWN_S": 10,
