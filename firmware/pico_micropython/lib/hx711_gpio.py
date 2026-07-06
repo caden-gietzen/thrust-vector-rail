@@ -148,7 +148,7 @@ class HX711:
         # low powers it up and resets the input channel/gain to the default.
         self.clock.value(False)
         self.clock.value(True)
-        time.sleep_us(70)          # hold SCK high > 60 us -> power down
+        time.sleep_us(200)         # hold SCK high >> 60 us datasheet min -> power down
         self.clock.value(False)    # SCK low -> power up
         if settle_ms:
             time.sleep_ms(settle_ms)  # let the amplifier settle before first read
