@@ -1,6 +1,6 @@
 {
   "orchestration_version": 1,
-  "description": "Repeated static servo PWM sweep for command-to-angle map identification.",
+  "description": "Static servo sweep that discovers the responsive range: walks outward from center in both directions and stops at encoder-flatline (true saturation). Probes past the standard hobby range to locate where control effectively stops.",
   "remote_config_path": "run_config.json",
   "write_manifest": false,
 
@@ -14,14 +14,18 @@
       "script": "servo_sweep_log.py",
       "config": {
         "FILENAME": "servo_static_pwm_to_angle_sweep",
-        "SERVO_CENTER_US": 1450,
-        "SERVO_MIN_US": 450,
-        "SERVO_MAX_US": 2450,
-        "SERVO_FREQ_HZ": 50,
+        "SERVO_CENTER_US": 1431,
+        "SERVO_ABS_MIN_US": 100,
+        "SERVO_ABS_MAX_US": 3000,
+        "SERVO_FREQ_HZ": 330,
 
         "STEP_US": 25,
         "HOLD_MS": 250,
-        "N_SWEEPS": 2
+        "N_SWEEPS": 2,
+
+        "STALL_DELTA_COUNTS": 4,
+        "STALL_STEPS_LIMIT": 3,
+        "STALL_HOLD_MS": 120
       }
     }
   ]

@@ -17,14 +17,18 @@
 #   mpremote connect COMx fs cp \
 #       firmware/pico_micropython/lib/servo_static_map.py :lib/servo_static_map.py
 
-# Zero-angle servo command (us). Static-map fit gave 1430.75 us -> 1431.
-NEUTRAL_US = 1431
+# Zero-angle servo command (us). Upgraded high-speed digital servo
+# (re-identified 2026-06-29): branch-mean lash-free neutral 1427.8 us -> 1428.
+# Responsive range 481..2531 us; backlash 0.39 deg (down from the prior servo's
+# 2.40 deg). Prior servo: 1430.75 -> 1431.
+NEUTRAL_US = 1428
 
 # Static gain. Signed form mirrors servoStaticMap.m (angle decreases with
 # command); DEG_PER_US is the magnitude used by the firmware "NEUTRAL - angle/mag"
-# command convention.
-GAIN_DEG_PER_US = -0.091092
-DEG_PER_US = 0.091092
+# command convention. Branch-mean (lash-free) value from the 2026-06-29 re-ID
+# (two repeats: 0.093991 / 0.094001). Prior servo: 0.091092.
+GAIN_DEG_PER_US = -0.093996
+DEG_PER_US = 0.093996
 
 
 def command_for_angle(angle_deg):

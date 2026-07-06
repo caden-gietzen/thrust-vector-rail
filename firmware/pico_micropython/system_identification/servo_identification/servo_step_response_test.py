@@ -16,11 +16,11 @@ import encoder
 # fall back to the last-known literals so the script still runs.
 try:
     from servo_static_map import NEUTRAL_US as _TRUTH_CENTER_US
-    from servo_static_map import DEG_PER_US as _TRUTH_DEG_PER_US
+    from servo_static_map import GAIN_DEG_PER_US as _TRUTH_GAIN_DEG_PER_US
     _TRUTH_SOURCE = "lib/servo_static_map.py"
 except ImportError:
     _TRUTH_CENTER_US = 1431
-    _TRUTH_DEG_PER_US = 0.091092
+    _TRUTH_GAIN_DEG_PER_US = -0.091092
     _TRUTH_SOURCE = "fallback literals (servo_static_map not on /lib)"
 
 # ============================================================
@@ -29,12 +29,11 @@ except ImportError:
 # Purpose:
 #   Identify dynamic servo command-to-angle behavior using encoder feedback.
 #
-# CSV output is intentionally similar to the static sweep script:
-#   - t_ms / t_s timing columns
-#   - servo_us command
-#   - count, count_zero, count_delta
-#   - theta_deg, theta_rad
-#   - segment / phase labels
+# CSV output is intentionally compact:
+#   - timing: t_s, time_since_step_s
+#   - grouping: case_idx, case_label, rep_idx, phase
+#   - command: step_start_us, step_end_us, servo_us, theta_cmd_deg
+#   - measurement: count_delta
 #
 # External configuration:
 #   This file will load /run_config.json first, then run_config.json.
@@ -60,7 +59,7 @@ SERVO_MAX_US = 2450
 # the carrier would characterise delay/slew in a regime the model is not fit for,
 # and not every servo tracks a faster frame cleanly. This is independent of the
 # encoder SAMPLE rate below, which we DO push high.
-SERVO_FREQ_HZ = 200
+SERVO_FREQ_HZ = 330
 
 # Encoder count-to-angle scale: spec-derived and exact (1:1 GT2 16T belt, 600 PPR
 # x 4 quadrature = 2400 counts/rev = 0.15 deg/count). Single source of truth on
@@ -69,11 +68,11 @@ COUNTS_PER_REV = 2400.0
 
 # Static command-to-angle gain from the truth source (signed; angle decreases with
 # command). theta_deg = STATIC_GAIN_DEG_PER_US * (servo_us - SERVO_CENTER_US).
-STATIC_GAIN_DEG_PER_US = -_TRUTH_DEG_PER_US
+STATIC_GAIN_DEG_PER_US = _TRUTH_GAIN_DEG_PER_US
 
 PRE_ZERO_CENTER_SETTLE_MS = 2000
 POST_ZERO_SETTLE_MS = 300
-BASELINE_HOLD_MS = 1000
+BASELINE_HOLD_MS = 200
 
 # Default timing.
 #
@@ -95,15 +94,22 @@ BASELINE_HOLD_MS = 1000
 # within RP2040 RAM/CPU; lower it if flash space is tight. May be fractional.
 SAMPLE_PERIOD_MS = 20
 STEP_SAMPLE_PERIOD_MS = 1
+ESTIMATED_SERVO_SLEW_DEG_PER_S = 240
+SETTLE_MARGIN_MS = 150
 # Only the first STEP_FAST_WINDOW_MS of the post-step hold is captured at the fast
 # rate; the rest is sampled at SAMPLE_PERIOD_MS. The transient (move + initial
 # settle) of the largest step here is ~200 ms, so ~350 ms of fast capture covers
 # it with margin while keeping the per-run CSV inside the Pico flash. Set <= 0 to
 # capture the entire post-step hold fast.
+# Dwell times are kept SHORT: the fast window already captures the move plus its
+# settle, so the post-step hold only needs a brief steady tail for the final-value
+# estimate (POST_STEP_HOLD_MS just past STEP_FAST_WINDOW_MS), and the pre-step and
+# return-to-center dwells only need to re-settle before the next step. Long dwells
+# add nothing but rows and fill the Pico flash before the campaign finishes.
 STEP_FAST_WINDOW_MS = 350
-PRE_STEP_HOLD_MS = 800
-POST_STEP_HOLD_MS = 1500
-BETWEEN_STEP_CENTER_HOLD_MS = 800
+PRE_STEP_HOLD_MS = 250
+POST_STEP_HOLD_MS = 450
+BETWEEN_STEP_CENTER_HOLD_MS = 250
 
 # CSV flushing. Use 1 for maximum data safety; larger values reduce overhead.
 FLUSH_EVERY_N_ROWS = 1
@@ -182,20 +188,8 @@ def write_pwm_us(pwm, pulse_us):
     return pulse_us
 
 
-def count_to_theta_deg(count_delta):
-    return count_delta / COUNTS_PER_REV * 360.0
-
-
-def count_to_theta_rad(count_delta):
-    return count_delta / COUNTS_PER_REV * 2.0 * math.pi
-
-
 def command_to_theta_deg(servo_us):
     return STATIC_GAIN_DEG_PER_US * (servo_us - SERVO_CENTER_US)
-
-
-def command_to_theta_rad(servo_us):
-    return command_to_theta_deg(servo_us) * math.pi / 180.0
 
 
 def safe_case_value(case, key, default_value):
@@ -204,26 +198,34 @@ def safe_case_value(case, key, default_value):
     return default_value
 
 
+def estimated_servo_move_ms(from_us, to_us):
+    slew = float(ESTIMATED_SERVO_SLEW_DEG_PER_S)
+    if slew <= 0:
+        raise ValueError("ESTIMATED_SERVO_SLEW_DEG_PER_S must be positive.")
+
+    angle_delta_deg = abs(command_to_theta_deg(to_us) - command_to_theta_deg(from_us))
+    return int(math.ceil(angle_delta_deg / slew * 1000.0))
+
+
+def hold_ms_for_move(from_us, to_us):
+    return estimated_servo_move_ms(from_us, to_us) + int(SETTLE_MARGIN_MS)
+
+
 def write_header(f):
     f.write(
-        "t_ms,t_s,trial_idx,case_idx,case_label,rep_idx,"
-        "phase,segment,"
-        "step_start_us,step_end_us,step_delta_us,servo_us,"
-        "theta_cmd_deg,theta_cmd_rad,"
-        "count,count_zero,count_delta,theta_deg,theta_rad,"
-        "time_since_step_ms,time_since_step_s\n"
+        "t_s,case_idx,case_label,rep_idx,phase,"
+        "step_start_us,step_end_us,servo_us,theta_cmd_deg,"
+        "count_delta,time_since_step_s\n"
     )
 
 
 def write_sample(
     f,
     start_ms,
-    trial_idx,
     case_idx,
     case_label,
     rep_idx,
     phase,
-    segment,
     step_start_us,
     step_end_us,
     servo_us,
@@ -231,46 +233,29 @@ def write_sample(
     step_start_time_ms,
 ):
     now_ms = time.ticks_ms()
-    t_ms = time.ticks_diff(now_ms, start_ms)
-    t_s = t_ms / 1000.0
+    t_s = time.ticks_diff(now_ms, start_ms) / 1000.0
 
     count = encoder.get_count()
     count_delta = count - count_zero
-    theta_deg = count_to_theta_deg(count_delta)
-    theta_rad = count_to_theta_rad(count_delta)
 
-    step_delta_us = int(step_end_us) - int(step_start_us)
     theta_cmd_deg = command_to_theta_deg(servo_us)
-    theta_cmd_rad = command_to_theta_rad(servo_us)
 
     if step_start_time_ms is None:
-        time_since_step_ms = -1
+        time_since_step_s = -1.0
     else:
-        time_since_step_ms = time.ticks_diff(now_ms, step_start_time_ms)
+        time_since_step_s = time.ticks_diff(now_ms, step_start_time_ms) / 1000.0
 
-    time_since_step_s = time_since_step_ms / 1000.0
-
-    f.write("{},{:.3f},{},{},{},{},{},{},{},{},{},{},{:.6f},{:.8f},{},{},{},{:.6f},{:.8f},{},{}\n".format(
-        t_ms,
+    f.write("{:.6f},{},{},{},{},{},{},{},{:.6f},{},{:.6f}\n".format(
         t_s,
-        trial_idx,
         case_idx,
         case_label,
         rep_idx,
         phase,
-        segment,
         step_start_us,
         step_end_us,
-        step_delta_us,
         servo_us,
         theta_cmd_deg,
-        theta_cmd_rad,
-        count,
-        count_zero,
         count_delta,
-        theta_deg,
-        theta_rad,
-        time_since_step_ms,
         time_since_step_s
     ))
 
@@ -280,12 +265,10 @@ def log_for_duration(
     start_ms,
     duration_ms,
     sample_period_ms,
-    trial_idx,
     case_idx,
     case_label,
     rep_idx,
     phase,
-    segment,
     step_start_us,
     step_end_us,
     servo_us,
@@ -309,12 +292,10 @@ def log_for_duration(
             write_sample(
                 f,
                 start_ms,
-                trial_idx,
                 case_idx,
                 case_label,
                 rep_idx,
                 phase,
-                segment,
                 step_start_us,
                 step_end_us,
                 servo_us,
@@ -334,7 +315,7 @@ def log_for_duration(
     return row_counter
 
 
-def capture_step_response_fast(start_ms, start_us, duration_ms, sample_period_ms, count_zero):
+def capture_step_response_fast(start_us, duration_ms, sample_period_ms):
     """Capture the step transient into RAM at a high, microsecond-timed rate.
 
     Returns (t_us_buf, count_buf, n): per-sample microsecond timestamp (relative
@@ -373,7 +354,6 @@ def write_captured_step_rows(
     count_buf,
     n,
     start_us,
-    trial_idx,
     case_idx,
     case_label,
     rep_idx,
@@ -385,48 +365,32 @@ def write_captured_step_rows(
     row_counter,
 ):
     """Format and write the buffered step-response samples after the burst."""
-    step_delta_us = int(step_end_us) - int(step_start_us)
     theta_cmd_deg = command_to_theta_deg(servo_us)
-    theta_cmd_rad = command_to_theta_rad(servo_us)
 
     for i in range(n):
         t_us = t_us_buf[i]
-        t_ms = t_us // 1000
         t_s = t_us / 1_000_000.0
 
         count = count_buf[i]
         count_delta = count - count_zero
-        theta_deg = count_to_theta_deg(count_delta)
-        theta_rad = count_to_theta_rad(count_delta)
 
         # Reconstruct the absolute sample time (start_us + t_us) to difference
         # against the step instant at microsecond precision.
         now_us = time.ticks_add(start_us, t_us)
         time_since_step_us = time.ticks_diff(now_us, step_start_time_us)
-        time_since_step_ms = time_since_step_us // 1000
         time_since_step_s = time_since_step_us / 1_000_000.0
 
-        f.write("{},{:.6f},{},{},{},{},{},{},{},{},{},{},{:.6f},{:.8f},{},{},{},{:.6f},{:.8f},{},{:.6f}\n".format(
-            t_ms,
+        f.write("{:.6f},{},{},{},{},{},{},{},{:.6f},{},{:.6f}\n".format(
             t_s,
-            trial_idx,
             case_idx,
             case_label,
             rep_idx,
             "step_response",
-            "step_response",
             step_start_us,
             step_end_us,
-            step_delta_us,
             servo_us,
             theta_cmd_deg,
-            theta_cmd_rad,
-            count,
-            count_zero,
             count_delta,
-            theta_deg,
-            theta_rad,
-            time_since_step_ms,
             time_since_step_s
         ))
 
@@ -444,7 +408,6 @@ def run_step_case(
     start_ms,
     start_us,
     count_zero,
-    trial_idx,
     case_idx,
     case,
     row_counter,
@@ -462,8 +425,21 @@ def run_step_case(
     return_to_center = bool(safe_case_value(case, "return_to_center", True))
     center_hold_ms = int(safe_case_value(case, "between_step_center_hold_ms", BETWEEN_STEP_CENTER_HOLD_MS))
 
+    min_pre_hold_ms = hold_ms_for_move(SERVO_CENTER_US, case_start_us)
+    min_post_hold_ms = hold_ms_for_move(case_start_us, end_us)
+    min_center_hold_ms = hold_ms_for_move(end_us, SERVO_CENTER_US)
+    min_fast_window_ms = min_post_hold_ms
+
+    pre_hold_ms = max(pre_hold_ms, min_pre_hold_ms)
+    post_hold_ms = max(post_hold_ms, min_post_hold_ms)
+    center_hold_ms = max(center_hold_ms, min_center_hold_ms)
+    if fast_window_ms > 0:
+        fast_window_ms = max(fast_window_ms, min_fast_window_ms)
+
     for rep_idx in range(1, reps + 1):
-        print("Case", case_idx, label, "rep", rep_idx, ":", case_start_us, "->", end_us)
+        print("Case", case_idx, label, "rep", rep_idx, ":", case_start_us, "->", end_us,
+              "holds ms pre/post/center:", pre_hold_ms, post_hold_ms, center_hold_ms,
+              "fast:", fast_window_ms)
 
         actual_start_us = write_pwm_us(pwm, case_start_us)
 
@@ -472,11 +448,9 @@ def run_step_case(
             start_ms,
             pre_hold_ms,
             sample_period_ms,
-            trial_idx,
             case_idx,
             label,
             rep_idx,
-            "pre_step_hold",
             "pre_step_hold",
             case_start_us,
             end_us,
@@ -490,9 +464,8 @@ def run_step_case(
         # slow rate for the settle tail. The fast window is where slew, delay, and
         # the rate-limit plateau live; the long tail only feeds the final-value
         # estimate, so sampling it at 1 kHz would just bloat the CSV (and can
-        # overflow the Pico flash). The step instant is timestamped in BOTH ms
-        # (legacy column / slow tail) and us (clean sub-ms velocity), as tightly
-        # around the PWM write as possible.
+        # overflow the Pico flash). The step instant is timestamped in us for
+        # clean sub-ms velocity, as tightly around the PWM write as possible.
         step_start_time_ms = time.ticks_ms()
         step_start_time_us = time.ticks_us()
         actual_end_us = write_pwm_us(pwm, end_us)
@@ -503,11 +476,9 @@ def run_step_case(
             fast_ms = min(post_hold_ms, fast_window_ms)
 
         t_us_buf, count_buf, n = capture_step_response_fast(
-            start_ms,
             start_us,
             fast_ms,
-            step_sample_period_ms,
-            count_zero
+            step_sample_period_ms
         )
 
         row_counter = write_captured_step_rows(
@@ -516,7 +487,6 @@ def run_step_case(
             count_buf,
             n,
             start_us,
-            trial_idx,
             case_idx,
             label,
             rep_idx,
@@ -535,11 +505,9 @@ def run_step_case(
                 start_ms,
                 tail_ms,
                 sample_period_ms,
-                trial_idx,
                 case_idx,
                 label,
                 rep_idx,
-                "step_response",
                 "step_response",
                 case_start_us,
                 end_us,
@@ -557,11 +525,9 @@ def run_step_case(
                 start_ms,
                 center_hold_ms,
                 sample_period_ms,
-                trial_idx,
                 case_idx,
                 label,
                 rep_idx,
-                "return_to_center",
                 "return_to_center",
                 end_us,
                 SERVO_CENTER_US,
@@ -617,10 +583,8 @@ try:
             BASELINE_HOLD_MS,
             SAMPLE_PERIOD_MS,
             0,
-            0,
             "baseline_center",
             0,
-            "baseline_center",
             "baseline_center",
             SERVO_CENTER_US,
             SERVO_CENTER_US,
@@ -630,8 +594,6 @@ try:
             row_counter
         )
 
-        trial_idx = 1
-
         for case_idx in range(1, len(STEP_CASES) + 1):
             row_counter = run_step_case(
                 f,
@@ -639,7 +601,6 @@ try:
                 start_ms,
                 start_us,
                 count_zero,
-                trial_idx,
                 case_idx,
                 STEP_CASES[case_idx - 1],
                 row_counter

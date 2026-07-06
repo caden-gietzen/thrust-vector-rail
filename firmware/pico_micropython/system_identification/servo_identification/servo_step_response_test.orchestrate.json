@@ -1,15 +1,8 @@
 {
   "orchestration_version": 1,
-  "description": "Repeated servo step-response test for command-to-angle dynamic identification. Center and static gain come from lib/servo_static_map.py (uploaded below); the step transient is captured at 1 kHz (RAM-buffered, microsecond-timestamped) so peak slew rate, delay, and the rate-limit plateau are well resolved. PWM stays at 200 Hz to match the PRPS-identified actuation regime.",
+  "description": "Repeated servo step-response test for command-to-angle dynamic identification. Center and static gain come from lib/servo_static_map.py (auto-synced to the Pico /lib before each run); the step transient is captured at 1 kHz (RAM-buffered, microsecond-timestamped) so peak slew rate, delay, and the rate-limit plateau are well resolved. PWM stays at 200 Hz to match the PRPS-identified actuation regime. Holds are sized against the estimated 240 deg/s servo slew rate plus settle margin.",
   "remote_config_path": "run_config.json",
   "write_manifest": false,
-
-  "uploads": [
-    {
-      "local": "firmware/pico_micropython/lib/servo_static_map.py",
-      "remote": "lib/servo_static_map.py"
-    }
-  ],
 
   "repeat_sequence": {
     "count": 2
@@ -27,11 +20,13 @@
 
         "SAMPLE_PERIOD_MS": 20,
         "STEP_SAMPLE_PERIOD_MS": 1,
+        "ESTIMATED_SERVO_SLEW_DEG_PER_S": 240,
+        "SETTLE_MARGIN_MS": 150,
         "STEP_FAST_WINDOW_MS": 350,
         "FLUSH_EVERY_N_ROWS": 50,
-        "PRE_STEP_HOLD_MS": 800,
-        "POST_STEP_HOLD_MS": 1500,
-        "BETWEEN_STEP_CENTER_HOLD_MS": 800,
+        "PRE_STEP_HOLD_MS": 250,
+        "POST_STEP_HOLD_MS": 450,
+        "BETWEEN_STEP_CENTER_HOLD_MS": 250,
 
         "STEP_CASES": [
           {

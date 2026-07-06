@@ -3,6 +3,9 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# Deprecated / retired files: preserved locally for reference, out of git.
+deprecated/
+
 # C extensions
 *.so
 
@@ -224,6 +227,9 @@ data/raw/**
 !data/raw/**/
 !data/raw/**/accepted/
 !data/raw/**/accepted/**
+
+# Built identified-parameter store (JSON source is tracked; .mat is a build artifact)
+data/processed/identified_parameters/identified_parameters.mat
 
 # Auto-generated Monte Carlo validation campaigns
 data/processed/controller_validation/tvr_stabilizer/monte_carlo/
