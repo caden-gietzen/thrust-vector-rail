@@ -17,7 +17,7 @@ The final rail is qualified against a suite of **four maneuvers**. Each isolates
 
 ## 2. Common setup and scoring
 
-- **Vehicle:** mass weighed before each campaign (nominal $0.5$ kg, design range $0.45$–$0.75$ kg per [hardware_selection.md](hardware_selection.md#2-requirements)).
+- **Vehicle:** mass weighed before each campaign (nominal $0.5$ kg, design range $0.45$–$0.75$ kg per [component_specification.md §2](component_specification.md#2-shared-over-bound-inputs)).
 - **Rail frame:** homed with [`lib/encoder_home.py`](../firmware/pico_micropython/lib/encoder_home.py); position zero $=$ rail center; travel bounded by the measured $316.5$ mm end-stop separation.
 - **Encoder scale:** $64\,810.4$ counts/m ([encoder_calibration/results.md](../experiments/encoder_calibration/results.md)); quantization floor $\approx 0.015$ mm.
 - **Logging ([R11](requirements.md#4-sensing-and-logging-requirements)):** $p$, $p_\text{ref}$, servo command, thrust command, controller output $\theta_\text{cmd}$, and timestamps, at the control/log rate, sufficient to recompute every metric offline ([R12](requirements.md#4-sensing-and-logging-requirements)).
