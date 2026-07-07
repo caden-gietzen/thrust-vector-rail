@@ -55,6 +55,36 @@ $$
 | 13 | 0.001630 | 19.3 | 13.2 | 8.27 | 10.0 |
 | **15** | **0.001618** | **17.1** | **13.4** | **9.32** | **8.7** |
 
+### Model structure — why FOPD, and structural uncertainty
+
+All four candidate structures were fit to the nominal (±15°) FRF and scored by train weighted
+FRF error and held-out time-domain VAF, to check whether a richer model is warranted (and, if so,
+whether it should be carried as a model-mismatch case in the uncertainty sweep). Full rationale in
+[model_selection.md](model_selection.md).
+
+| Structure | # params | $\tau_1/\tau_2$ (ms) | L (ms) | train err | mag RMSE (dB) | held-out VAF |
+|---|---:|---:|---:|---:|---:|---:|
+| first-order | 2 | 32.4 / – | 0.0 | 0.1694 | 1.089 | 98.0% |
+| **first-order + delay (FOPD)** | 3 | 17.1 / – | 13.4 | 0.0185 | 0.084 | **99.9%** |
+| second-order lag | 3 | 15.1 / 15.1 | 0.0 | 0.0650 | 0.487 | 99.7% |
+| second-order lag + delay | 4 | 11.4 / 11.4 | 6.9 | 0.0147 | 0.055 | 99.9% |
+
+The second-order-lag-delay shaves the *train* FRF error (0.0147 vs 0.0185) but its **held-out VAF
+is identical to FOPD (99.9%)**, and its poles collapse to an **equal pair** ($\tau_1=\tau_2=11.4$
+ms) with a *reduced* delay (6.9 ms) — i.e. it is using a repeated pole to Padé-approximate part of
+the transport delay, not capturing a distinct second dynamic. Both fits sit at the sub-0.1 dB
+measurement floor. In the Bode below the FOPD and second-order-delay curves lie on top of each
+other and on the empirical FRF, while `first_order` (no delay) and `second_order_lag` diverge in
+phase and roll-off above the corner.
+
+**Conclusion — structural uncertainty is negligible; FOPD is retained and no model-order case is
+added to the uncertainty sweep.** The added order does not generalize (identical VAF) and is
+dynamically equivalent to FOPD; the parametric **amplitude window** ($\tau$ 17.1–20.0 ms) is a
+*real* dynamic variation that already dwarfs the FOPD-vs-higher-order gap and is the operative
+structural stress for the robust design.
+
+![Bode of the chosen servo FOPD vs empirical FRF and candidate structures](../../plots/system_identification/servo_identification/servo_prps_log/bode_of_chosen_servo_fopd_vs_empirical_frf_and_candidate_structures.png)
+
 ### Uncertainty quantification
 
 Two independent uncertainty tiers are reported, both derived from the same PRPS data by the
